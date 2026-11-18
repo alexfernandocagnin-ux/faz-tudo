@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -534,9 +535,54 @@ def sidebar_sigtap_switch() -> None:
         st.caption(f":material/new_releases: A tabela **{newer[0][4:]}/{newer[0][:4]}** já foi baixada e está pronta para uso.")
 
 
+def theme_switcher() -> None:
+    """Botões Automático / Claro / Escuro. "Automático" (padrão) segue o tema do Windows.
+
+    O Streamlit guarda a escolha no navegador (localStorage "stActiveTheme-<página>-v2" = "System" | "Light" | "Dark")
+    e só lê ao carregar a página. Os botões ficam dentro do próprio quadro do componente porque o Streamlit só deixa
+    um componente recarregar a página quando o clique acontece nele (allow-top-navigation-by-user-activation).
+    """
+    paths = sorted({"/", *[f"/{p.url_path}" for p in PAGES.values()]})
+    js_paths = ", ".join(f'"{p}"' for p in paths)
+    st.caption("Tema")
+    components.html(f"""
+<style>
+  html, body {{ margin: 0; background: transparent; }}
+  .seg {{ display: flex; gap: 4px; padding: 3px; border-radius: 10px; font: 600 13px "Source Sans Pro", "Segoe UI", sans-serif; }}
+  .seg button {{ flex: 1; border: 0; border-radius: 8px; padding: 7px 4px; cursor: pointer; font: inherit; background: transparent; }}
+</style>
+<div class="seg" id="seg">
+  <button data-v="System" title="Segue o tema do Windows">Automático</button>
+  <button data-v="Light">Claro</button>
+  <button data-v="Dark">Escuro</button>
+</div>
+<script>
+  const w = window.parent;
+  const key = p => `stActiveTheme-${{p}}-v2`;
+  let current = "System";
+  try {{ current = JSON.parse(w.localStorage.getItem(key(w.location.pathname)) || '"System"'); }} catch (e) {{}}
+  // Cores combinando com o tema que está na tela agora.
+  const bg = w.getComputedStyle(w.document.body).backgroundColor.match(/\\d+/g).map(Number);
+  const dark = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) < 128;
+  const seg = document.getElementById("seg");
+  seg.style.background = dark ? "rgba(255,255,255,.07)" : "rgba(15,23,42,.06)";
+  for (const b of seg.querySelectorAll("button")) {{
+    const on = b.dataset.v === current;
+    b.style.color = on ? "#fff" : (dark ? "#cbd5e1" : "#334155");
+    b.style.background = on ? "#0d9488" : "transparent";
+    b.onclick = () => {{
+      const value = JSON.stringify(b.dataset.v);
+      for (const p of [{js_paths}, w.location.pathname]) w.localStorage.setItem(key(p), value);
+      w.location.reload();
+    }};
+  }}
+</script>""", height=44)
+
+
 with st.sidebar:
     st.divider()
     sidebar_sigtap_switch()
+    theme_switcher()
     st.caption(":material/lock: Relatórios e remessas enviados são lidos só em memória e não ficam salvos.")
 
 nav.run()
