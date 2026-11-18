@@ -120,10 +120,11 @@ def page_solver() -> None:
                 "corrigir — com a mensagem para mandar.")
 
     uploads = st.file_uploader(
-        "Relatórios do SIA", type=["out", "txt"], accept_multiple_files=True, key="r0350",
-        help="R0350.OUT = ocorrências da consistência (obrigatório). R0330T.OUT = espelho das APACs (opcional: com ele eu "
-             "digo exatamente qual procedimento obrigatório faltou). Ficam na pasta do processamento, ex.: "
-             "C:\\Datasus\\SIA\\SIA_2026_10_Processamento")
+        "Relatórios do SIA (pode selecionar vários de uma vez)", accept_multiple_files=True, key="r0350",
+        help="R0350.OUT = ocorrências da consistência (obrigatório). Espelhos das APACs (opcional: com eles eu digo "
+             "exatamente qual procedimento obrigatório faltou) = R0330T.OUT ou os arquivos \"<nº da APAC> apac.<mês>\" "
+             "(ex.: 3526702073280 apac.AGO). Ficam na pasta do processamento, ex.: "
+             "C:\\Datasus\\SIA\\SIA_2026_10_Processamento. Eu reconheço cada arquivo pelo conteúdo.")
 
     reports, mirrors = [], []
     for up in uploads or []:
@@ -133,7 +134,7 @@ def page_solver() -> None:
         elif looks_like_apac_mirror(text):
             mirrors += parse_apac_mirror(text)
         else:
-            st.warning(f"**{up.name}** não é o R0350 (ocorrências da consistência) nem o R0330T (espelho das APACs). Ignorei.",
+            st.warning(f"**{up.name}** não é o R0350 (ocorrências da consistência) nem espelho de APAC. Ignorei.",
                        icon=":material/warning:")
 
     if not reports:
@@ -142,7 +143,8 @@ def page_solver() -> None:
                     icon=":material/info:")
         html('<div class="ft-card"><div class="ft-section" style="margin-top:0">Como usar</div>'
              + bullet_list([
-                 "Arraste o R0350.OUT da pasta do processamento do SIA. Se tiver erro de APAC, arraste junto o R0330T.OUT (espelho das APACs).",
+                 "Arraste o R0350.OUT da pasta do processamento do SIA. Se tiver erro de APAC, arraste junto os espelhos "
+                 "(R0330T.OUT ou os arquivos \"<nº da APAC> apac.<mês>\"): pode selecionar todos de uma vez.",
                  "Você recebe a lista do que fazer separada por estabelecimento, já com o motivo e a correção.",
                  "Cada estabelecimento tem uma mensagem pronta: é só copiar e mandar no e-mail ou WhatsApp.",
              ]) + '</div>')
@@ -151,6 +153,13 @@ def page_solver() -> None:
     name, text = reports[0]
     report = parse_report(text, name)
     result = ConsistencySolver(sigtap(), KB).solve(report, mirrors)
+    if mirrors:
+        have = {m.number for m in mirrors}
+        need = sorted({r for p in result.problems if p.code == "ERRo" for a in p.actions for r in a.refs})
+        missing = [n for n in need if n not in have]
+        if missing:
+            st.info("Ainda sem espelho para: " + ", ".join(f"**{n}**" for n in missing)
+                    + ". Envie os arquivos dessas APACs junto para eu dizer exatamente o que falta.", icon=":material/info:")
 
     # ---------- Filtro: BPA (BPA Magnético) fica escondido por padrão ----------
     meta = " · ".join(x for x in [report.source_name, report.orgao, f"competência {report.competencia}",

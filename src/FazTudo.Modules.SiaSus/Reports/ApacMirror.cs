@@ -65,15 +65,22 @@ public sealed class ApacMirror
             m = Apac.Match(s);
             if (m.Success)
             {
-                current = new ApacMirror
+                var number = m.Groups[1].Value.Replace("-", string.Empty);
+                // O cabeçalho da APAC se repete na quebra de página: continua na mesma APAC.
+                current = result.FirstOrDefault(x => x.Number == number);
+                if (current is null)
                 {
-                    Cnes = cnes,
-                    CnesName = cnesName,
-                    Number = m.Groups[1].Value.Replace("-", string.Empty),
-                    Validity = m.Groups[2].Value.Trim(),
-                    ApacType = m.Groups[3].Value
-                };
-                result.Add(current);
+                    current = new ApacMirror
+                    {
+                        Cnes = cnes,
+                        CnesName = cnesName,
+                        Number = number,
+                        Validity = m.Groups[2].Value.Trim(),
+                        ApacType = m.Groups[3].Value
+                    };
+                    result.Add(current);
+                }
+
                 inItems = false;
                 continue;
             }

@@ -71,3 +71,25 @@ def test_respostas_usam_a_tabela_oficial():
 
 def test_siglas_ficam_em_maiusculas():
     assert official().find("090101009").name.startswith("OCI ")
+
+
+def test_item_sem_orcamento_no_espelho_vira_dica_de_fpo():
+    texto = decode_report((FIX / "R0330T-exemplo.OUT").read_bytes()).replace(
+        "2074044     SEM ERROS", "2074044     PROCEDIMENTO SEM ORCAMENTO")
+    report = parse_report(decode_report((FIX / "R0350-exemplo.OUT").read_bytes()), "R0350.OUT")
+    result = ConsistencySolver(official(), load_knowledge()).solve(report, parse_apac_mirror(texto))
+    erro = next(p for p in result.problems if p.code == "ERRo")
+    notas = [n for a in erro.actions if "3526702075237" in a.refs for n in a.notes]
+    assert any("PROCEDIMENTO SEM ORCAMENTO" in n and "FPO Magnético do CNES 2074044" in n for n in notas)
+
+
+def test_sem_espelho_diz_qual_arquivo_mandar():
+    erro = next(p for p in solve(with_mirror=False).problems if p.code == "ERRo")
+    assert any("3526702075237 apac" in n for a in erro.actions for n in a.notes)
+
+
+def test_relatorio_recortado_sem_quadro_de_totais_nao_quebra():
+    report = parse_report(decode_report((FIX / "R0350-exemplo.OUT").read_bytes()), "R0350.OUT")
+    report.totals = []
+    result = ConsistencySolver(official(), load_knowledge()).solve(report)
+    assert sum(p.quantity for p in result.problems) == len(report.records)

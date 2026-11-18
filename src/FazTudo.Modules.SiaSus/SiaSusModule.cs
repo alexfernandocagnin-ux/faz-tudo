@@ -64,13 +64,18 @@ public sealed class SiaSusModule : ISolutionModule
     public Reports.SolverResult SolveFiles(IEnumerable<string> paths)
     {
         Reports.ConsistencyReport? report = null;
+        string? reportPath = null;
         var mirrors = new List<Reports.ApacMirror>();
         foreach (var path in paths)
         {
             var text = File.ReadAllText(path, System.Text.Encoding.Latin1);
             if (Reports.ConsistencyReport.LooksLikeConsistencyReport(text))
             {
-                report ??= Reports.ConsistencyReport.Parse(text, Path.GetFileName(path));
+                if (report is null)
+                {
+                    report = Reports.ConsistencyReport.Parse(text, Path.GetFileName(path));
+                    reportPath = path;
+                }
             }
             else if (Reports.ApacMirror.LooksLikeApacMirror(text))
             {
@@ -85,7 +90,57 @@ public sealed class SiaSusModule : ISolutionModule
                 : "Nenhum dos arquivos é o Relatório de Ocorrências na Consistência do SIA (R0350.OUT).");
         }
 
+        if (reportPath is not null)
+        {
+            mirrors.AddRange(FindMirrorsNear(reportPath, mirrors.Select(m => m.Number).ToHashSet()));
+        }
+
         return new Reports.ConsistencySolver(Sigtap, _knowledgeBase).Solve(report, mirrors);
+    }
+
+    /// <summary>
+    /// Procura sozinho os espelhos das APACs na pasta do R0350 (é onde o SIA grava o R0330T.OUT e os arquivos
+    /// "&lt;nº da APAC&gt; apac.&lt;mês&gt;"). Reconhece pelo conteúdo e ignora arquivos grandes ou que não são espelho.
+    /// </summary>
+    public static IEnumerable<Reports.ApacMirror> FindMirrorsNear(string reportPath, ISet<string> alreadyHave)
+    {
+        var folder = Path.GetDirectoryName(Path.GetFullPath(reportPath));
+        if (folder is null || !Directory.Exists(folder))
+        {
+            yield break;
+        }
+
+        // Do mais novo para o mais velho: se houver espelho antigo da mesma APAC, vale o mais recente.
+        foreach (var file in Directory.EnumerateFiles(folder).OrderByDescending(File.GetLastWriteTimeUtc))
+        {
+            var name = Path.GetFileName(file);
+            var candidate = name.Contains("apac", StringComparison.OrdinalIgnoreCase) && !name.EndsWith(".DBF", StringComparison.OrdinalIgnoreCase)
+                            || name.StartsWith("R0330", StringComparison.OrdinalIgnoreCase);
+            if (!candidate || new FileInfo(file).Length > 5_000_000)
+            {
+                continue;
+            }
+
+            string text;
+            try
+            {
+                text = File.ReadAllText(file, System.Text.Encoding.Latin1);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            if (!Reports.ApacMirror.LooksLikeApacMirror(text))
+            {
+                continue;
+            }
+
+            foreach (var m in Reports.ApacMirror.Parse(text).Where(m => alreadyHave.Add(m.Number)))
+            {
+                yield return m;
+            }
+        }
     }
 
     public EnvironmentDoctor Doctor { get; } = new();

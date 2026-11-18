@@ -212,8 +212,8 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
 
         if (ordered.Any(p => p.Code == "ERRo") && _mirrors.Count == 0)
         {
-            notes.Add("Dica: envie também o espelho das APACs (R0330T.OUT, \"Situação de Produção de APAC\") que eu digo " +
-                      "exatamente qual procedimento obrigatório ficou faltando em cada APAC.");
+            notes.Add("Dica: coloque os espelhos das APACs (R0330T.OUT ou os arquivos \"<nº da APAC> apac.<mês>\") na mesma pasta " +
+                      "do R0350, ou selecione junto, que eu digo exatamente qual procedimento obrigatório ficou faltando em cada APAC.");
         }
 
         notes.Add("Depois de corrigir na origem (prontuário, BPA-Mag, APAC-Mag, CNES ou FPO), reimporte e rode a consistência de novo.");
@@ -368,20 +368,51 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
             {
                 var miss = string.Join("; ", missing.Select(c => $"{Proc(c.Code)} (qtd. {c.Quantity})"));
                 return $"APAC {apac} ({Proc(principal)}): FALTA lançar o secundário obrigatório {miss}. " +
-                       $"Já lançados: {(done.Length > 0 ? done : "nenhum")}. Incluir na APAC e reapresentar (se não foi realizado, a OCI não está completa).";
+                       $"Já lançados: {(done.Length > 0 ? done : "nenhum")}. Incluir na APAC e reapresentar (se não foi realizado, a OCI não está completa)." +
+                       MirrorFlags(mirror);
             }
 
-            return $"APAC {apac} ({Proc(principal)}): todos os obrigatórios ({names}) estão lançados no espelho — confira a quantidade e o CBO de cada um.";
+            return $"APAC {apac} ({Proc(principal)}): todos os obrigatórios ({names}) estão lançados no espelho — confira a quantidade e o CBO de cada um." +
+                   MirrorFlags(mirror);
         }
 
         if (obligatory.Count > 0)
         {
             return $"APAC {apac} ({Proc(principal)}): o SIGTAP exige os secundários obrigatórios {names}. " +
-                   "Confira no espelho da APAC e inclua os que faltarem.";
+                   "Confira no espelho da APAC e inclua os que faltarem. Para eu dizer exatamente qual falta, deixe o espelho " +
+                   $"desta APAC (\"{apac} apac.<mês>\" ou R0330T.OUT) na pasta do R0350.";
         }
 
         return $"APAC {apac} ({Proc(principal)}): falta procedimento secundário obrigatório. " +
                "Confira as compatibilidades obrigatórias do procedimento no SIGTAP e inclua na APAC.";
+    }
+
+    /// <summary>Itens que o próprio espelho marcou com erro, já com o que fazer.</summary>
+    private string MirrorFlags(ApacMirror mirror)
+    {
+        var sb = new System.Text.StringBuilder();
+        // O aviso "exige secundário obrigatório" é o próprio erro que já estou explicando: não repito.
+        foreach (var i in mirror.Items.Where(i => i.HasError && !i.Situation.Contains("SECUNDARIO OBRIGATORIO", StringComparison.OrdinalIgnoreCase)))
+        {
+            var sit = i.Situation.ToUpperInvariant();
+            var tip = string.Empty;
+            if (sit.Contains("ORCAMENTO", StringComparison.Ordinal))
+            {
+                var rule = sigtap.FindByCode(i.ProcedureCode);
+                var part = rule is null ? string.Empty
+                    : rule.Financing.Contains("MAC", StringComparison.OrdinalIgnoreCase) ? "na parte MAC, " : "na parte não MAC, ";
+                var cnes = i.ThirdPartyCnes.Length > 0 ? i.ThirdPartyCnes : mirror.Cnes;
+                tip = $" → falta orçamento na FPO: no FPO Magnético do CNES {cnes}, {part}programar {Proc(i.ProcedureCode)}.";
+            }
+            else if (sit.Contains("CBO", StringComparison.Ordinal))
+            {
+                tip = " → confira o CBO do profissional no CNES e os CBOs aceitos no SIGTAP (Consultor SIGTAP).";
+            }
+
+            sb.Append($" No espelho, o item {i.Seq} ({Proc(i.ProcedureCode)}) está com \"{i.Situation.Trim()}\"{tip}");
+        }
+
+        return sb.ToString();
     }
 
     private static List<OwnerGroup> BuildOwners(List<ProblemExplanation> problems, ConsistencyReport report)

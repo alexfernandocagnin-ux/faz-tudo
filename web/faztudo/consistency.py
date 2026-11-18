@@ -257,9 +257,12 @@ def parse_apac_mirror(text: str) -> list[ApacMirror]:
             continue
         m = re.match(r"APAC:\s*([\d-]+)\s+Validade:\s*(.*?)\s+Tipo:\s*(\S+)", s)
         if m:
-            current = ApacMirror(cnes, cnes_name, m.group(1).replace("-", ""), m.group(2).strip(), m.group(3),
-                                 "", "", "", "", "")
-            mirrors.append(current)
+            number = m.group(1).replace("-", "")
+            # O cabeçalho da APAC se repete na quebra de página: continua na mesma APAC.
+            current = next((x for x in mirrors if x.number == number), None)
+            if current is None:
+                current = ApacMirror(cnes, cnes_name, number, m.group(2).strip(), m.group(3), "", "", "", "", "")
+                mirrors.append(current)
             in_items = False
             continue
         if current is None:
@@ -475,13 +478,24 @@ class ConsistencySolver:
             notes.append("Estou usando a base de exemplo do SIGTAP. Importe a tabela oficial da competência (Consultor SIGTAP) "
                          "para eu dizer faixas de idade, quantidades máximas e CIDs aceitos de todos os procedimentos.")
         if any(p.code == "ERRo" for p in problems) and not self.mirrors:
-            notes.append("Dica: envie também o espelho das APACs (R0330T.OUT, \"Situação de Produção de APAC\") que eu digo "
-                         "exatamente qual procedimento obrigatório ficou faltando em cada APAC.")
+            notes.append("Dica: envie também os espelhos das APACs (os arquivos \"<nº da APAC> apac.<mês>\" ou o R0330T.OUT, "
+                         "\"Situação de Produção de APAC\", da pasta de processamento do SIA, ex.: Datasus/SIA/"
+                         "SIA_AAAA_MM_Processamento). Pode selecionar todos junto com o R0350 que eu digo exatamente "
+                         "qual procedimento obrigatório ficou faltando em cada APAC.")
         notes.append("Depois de corrigir na origem (prontuário, BPA-Mag, APAC-Mag, CNES ou FPO), reimporte e rode a "
                      "consistência de novo.")
         result = SolverResult(report, problems, headline, notes)
         result.owners = self._owners(problems, report)
         return result
+
+    @staticmethod
+    def _totals_from_records(report: ConsistencyReport) -> list[OccurrenceTotal]:
+        """Relatório recortado (sem o quadro de totais): conta pelas linhas do detalhe."""
+        counts: dict[tuple[str, str, str], int] = {}
+        for r in report.records:
+            key = (r.group, r.code, r.description)
+            counts[key] = counts.get(key, 0) + 1
+        return [OccurrenceTotal(g, c, n, d) for (g, c, d), n in counts.items()]
 
     # ------------------------------------------------------------ respostas prontas
     def _proc(self, code: str) -> str:
@@ -621,6 +635,7 @@ class ConsistencySolver:
         names = "; ".join(f"{self._proc(c)} (qtd. {q})" for c, q in obligatory)
         title = "Falta procedimento secundário obrigatório"
         mirror = self.mirrors.get(apac)
+        flagged = self._mirror_flags(mirror)
         if mirror and obligatory:
             launched = {i.procedure_code for i in mirror.items}
             missing = [(c, q) for c, q in obligatory if c not in launched]
@@ -630,14 +645,34 @@ class ConsistencySolver:
                 return (title, [apac], "APAC", f"{self._proc(principal)} exige os obrigatórios {names}.",
                         f"FALTA lançar o secundário obrigatório {miss}. Incluir na APAC e reapresentar "
                         "(se não foi realizado, a OCI não está completa).",
-                        [f"Já lançados: {done or 'nenhum'}."])
+                        [f"Já lançados: {done or 'nenhum'}."] + flagged)
             return (title, [apac], "APAC", f"{self._proc(principal)} exige os obrigatórios {names}.",
-                    "Todos os obrigatórios estão lançados no espelho: confira a quantidade e o CBO de cada um.", [])
+                    "Todos os obrigatórios estão lançados no espelho: confira a quantidade e o CBO de cada um.", flagged)
         if obligatory:
             return (title, [apac], "APAC", f"{self._proc(principal)}: o SIGTAP exige os secundários obrigatórios {names}.",
-                    "Conferir no espelho da APAC (R0330T) e incluir os que faltarem.", [])
+                    "Conferir no espelho da APAC e incluir os que faltarem.",
+                    [f"Para eu dizer exatamente qual falta: envie junto o espelho desta APAC (arquivo \"{apac} apac.<mês>\" "
+                     "ou R0330T.OUT, na pasta de processamento do SIA)."])
         return (title, [apac], "APAC", f"{self._proc(principal)}: falta procedimento secundário obrigatório.",
                 "Conferir as compatibilidades obrigatórias do procedimento no SIGTAP e incluir na APAC.", [])
+
+    def _mirror_flags(self, mirror: "ApacMirror | None") -> list[str]:
+        """Itens que o próprio espelho marcou com erro, já com o que fazer."""
+        out = []
+        for i in (mirror.items if mirror else []):
+            if not i.has_error or "SECUNDARIO OBRIGATORIO" in i.situation.upper():
+                continue  # esse aviso é o próprio erro que já estou explicando
+            sit = i.situation.upper()
+            tip = ""
+            if "ORCAMENTO" in sit:
+                rule = self.sigtap.find(i.procedure_code)
+                part = ("na parte MAC" if rule.is_mac else "na parte não MAC") if rule else ""
+                tip = (f" → falta orçamento na FPO: no FPO Magnético do CNES {i.third_party_cnes or mirror.cnes}, "
+                       f"{part + ', ' if part else ''}programar {self._proc(i.procedure_code)}.")
+            elif "CBO" in sit:
+                tip = " → confira o CBO do profissional no CNES e os CBOs aceitos no SIGTAP (Consultor SIGTAP)."
+            out.append(f"No espelho, o item {i.seq} ({self._proc(i.procedure_code)}) está com \"{i.situation.strip()}\"{tip}")
+        return out
 
     def _owners(self, problems: list[ProblemExplanation], report: ConsistencyReport) -> list[OwnerGroup]:
         groups: dict[tuple[str, str], OwnerGroup] = {}

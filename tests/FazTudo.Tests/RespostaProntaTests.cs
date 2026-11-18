@@ -36,13 +36,42 @@ public class RespostaProntaTests
 
     private static SolverResult Solve(bool withMirror)
     {
-        var files = new List<string> { Path.Combine(Fixtures, "R0350-exemplo.OUT") };
         if (withMirror)
         {
-            files.Add(Path.Combine(Fixtures, "R0330T-exemplo.OUT"));
+            return OfficialModule().SolveFiles([Path.Combine(Fixtures, "R0350-exemplo.OUT"), Path.Combine(Fixtures, "R0330T-exemplo.OUT")]);
         }
 
-        return OfficialModule().SolveFiles(files);
+        // Pasta só com o R0350: senão o programa acha o espelho sozinho ao lado dele.
+        var folder = Directory.CreateTempSubdirectory("conserta-sia-").FullName;
+        try
+        {
+            var report = Path.Combine(folder, "R0350.OUT");
+            File.Copy(Path.Combine(Fixtures, "R0350-exemplo.OUT"), report);
+            return OfficialModule().SolveFiles([report]);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Acha_sozinho_o_espelho_na_pasta_do_R0350()
+    {
+        var folder = Directory.CreateTempSubdirectory("conserta-sia-").FullName;
+        try
+        {
+            var report = Path.Combine(folder, "R0350.OUT");
+            File.Copy(Path.Combine(Fixtures, "R0350-exemplo.OUT"), report);
+            // Mesmo nome que o SIA usa nos espelhos avulsos; o conteúdo vem do exemplo (fictício).
+            File.Copy(Path.Combine(Fixtures, "R0330T-exemplo.OUT"), Path.Combine(folder, "3526702075237 apac.OUT"));
+            var erro = OfficialModule().SolveFiles([report]).Problems.Single(p => p.Code == "ERRo");
+            Assert.Contains(erro.Actions, a => a.Text.Contains("FALTA lançar o secundário obrigatório 02.01.01.058-5"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     [Fact]
@@ -85,6 +114,7 @@ public class RespostaProntaTests
         var erro = result.Problems.Single(p => p.Code == "ERRo");
         Assert.All(erro.Actions, a => Assert.Contains("exige os secundários obrigatórios 02.01.01.058-5", a.Text));
         Assert.Contains(result.Notes, n => n.Contains("R0330T"));
+        Assert.Contains(erro.Actions, a => a.Text.Contains("\"3526702075237 apac.<mês>\""));
     }
 
     [Fact]
