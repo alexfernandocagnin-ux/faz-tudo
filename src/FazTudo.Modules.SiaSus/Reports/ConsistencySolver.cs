@@ -379,8 +379,7 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
         if (obligatory.Count > 0)
         {
             return $"APAC {apac} ({Proc(principal)}): o SIGTAP exige os secundários obrigatórios {names}. " +
-                   "Confira no espelho da APAC e inclua os que faltarem. Para eu dizer exatamente qual falta, deixe o espelho " +
-                   $"desta APAC (\"{apac} apac.<mês>\" ou R0330T.OUT) na pasta do R0350.";
+                   "Confira no espelho da APAC e inclua os que faltarem.";
         }
 
         return $"APAC {apac} ({Proc(principal)}): falta procedimento secundário obrigatório. " +

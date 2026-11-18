@@ -114,7 +114,6 @@ public class RespostaProntaTests
         var erro = result.Problems.Single(p => p.Code == "ERRo");
         Assert.All(erro.Actions, a => Assert.Contains("exige os secundários obrigatórios 02.01.01.058-5", a.Text));
         Assert.Contains(result.Notes, n => n.Contains("R0330T"));
-        Assert.Contains(erro.Actions, a => a.Text.Contains("\"3526702075237 apac.<mês>\""));
     }
 
     [Fact]

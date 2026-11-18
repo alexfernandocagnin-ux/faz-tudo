@@ -1,5 +1,5 @@
-# Tema do app web (web/app.py). Claro e escuro definidos separadamente: o usuário escolhe no menu ⋮ → Settings,
-# ou o navegador segue o tema do sistema. As cores foram escolhidas para texto legível nos dois.
+# Tema do app web (web/app.py). Claro e escuro definidos separadamente. O padrão é o Claro (o app grava na 1ª visita);
+# quem quiser troca no seletor "Tema" da barra lateral. As cores foram escolhidas para texto legível nos dois.
 
 [server]
 maxUploadSize = 200

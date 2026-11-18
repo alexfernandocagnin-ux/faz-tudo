@@ -83,11 +83,6 @@ def test_item_sem_orcamento_no_espelho_vira_dica_de_fpo():
     assert any("PROCEDIMENTO SEM ORCAMENTO" in n and "FPO Magnético do CNES 2074044" in n for n in notas)
 
 
-def test_sem_espelho_diz_qual_arquivo_mandar():
-    erro = next(p for p in solve(with_mirror=False).problems if p.code == "ERRo")
-    assert any("3526702075237 apac" in n for a in erro.actions for n in a.notes)
-
-
 def test_relatorio_recortado_sem_quadro_de_totais_nao_quebra():
     report = parse_report(decode_report((FIX / "R0350-exemplo.OUT").read_bytes()), "R0350.OUT")
     report.totals = []

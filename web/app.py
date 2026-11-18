@@ -573,7 +573,7 @@ def sidebar_sigtap_switch() -> None:
 
 
 def theme_switcher() -> None:
-    """Botões Automático / Claro / Escuro. "Automático" (padrão) segue o tema do Windows.
+    """Botões Claro / Escuro / Automático. O padrão é o Claro; "Automático" segue o tema do Windows.
 
     O Streamlit guarda a escolha no navegador (localStorage "stActiveTheme-<página>-v2" = "System" | "Light" | "Dark")
     e só lê ao carregar a página. Os botões ficam dentro do próprio quadro do componente porque o Streamlit só deixa
@@ -589,15 +589,24 @@ def theme_switcher() -> None:
   .seg button {{ flex: 1; border: 0; border-radius: 8px; padding: 7px 4px; cursor: pointer; font: inherit; background: transparent; }}
 </style>
 <div class="seg" id="seg">
-  <button data-v="System" title="Segue o tema do Windows">Automático</button>
   <button data-v="Light">Claro</button>
   <button data-v="Dark">Escuro</button>
+  <button data-v="System" title="Segue o tema do Windows">Automático</button>
 </div>
 <script>
   const w = window.parent;
   const key = p => `stActiveTheme-${{p}}-v2`;
-  let current = "System";
-  try {{ current = JSON.parse(w.localStorage.getItem(key(w.location.pathname)) || '"System"'); }} catch (e) {{}}
+  const all = [{js_paths}, w.location.pathname];
+  let current = "Light";
+  try {{
+    if (!w.localStorage.getItem("ft-tema-v1")) {{
+      // 1ª visita neste navegador: fica no Claro (sozinho o Streamlit seguiria o Windows). Só acontece uma vez.
+      w.localStorage.setItem("ft-tema-v1", "1");
+      for (const p of all) w.localStorage.setItem(key(p), '"Light"');
+      w.eval("location.reload()");
+    }}
+    current = JSON.parse(w.localStorage.getItem(key(w.location.pathname)) || '"Light"');
+  }} catch (e) {{}}
   // Cores combinando com o tema que está na tela agora.
   const bg = w.getComputedStyle(w.document.body).backgroundColor.match(/\\d+/g).map(Number);
   const dark = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) < 128;
@@ -609,7 +618,8 @@ def theme_switcher() -> None:
     b.style.background = on ? "#0d9488" : "transparent";
     b.onclick = () => {{
       const value = JSON.stringify(b.dataset.v);
-      for (const p of [{js_paths}, w.location.pathname]) w.localStorage.setItem(key(p), value);
+      w.localStorage.setItem("ft-tema-v1", "1");
+      for (const p of all) w.localStorage.setItem(key(p), value);
       w.location.reload();
     }};
   }}

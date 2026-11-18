@@ -650,9 +650,7 @@ class ConsistencySolver:
                     "Todos os obrigatórios estão lançados no espelho: confira a quantidade e o CBO de cada um.", flagged)
         if obligatory:
             return (title, [apac], "APAC", f"{self._proc(principal)}: o SIGTAP exige os secundários obrigatórios {names}.",
-                    "Conferir no espelho da APAC e incluir os que faltarem.",
-                    [f"Para eu dizer exatamente qual falta: envie junto o espelho desta APAC (arquivo \"{apac} apac.<mês>\" "
-                     "ou R0330T.OUT, na pasta de processamento do SIA)."])
+                    "Conferir no espelho da APAC (R0330T) e incluir os que faltarem.", [])
         return (title, [apac], "APAC", f"{self._proc(principal)}: falta procedimento secundário obrigatório.",
                 "Conferir as compatibilidades obrigatórias do procedimento no SIGTAP e incluir na APAC.", [])
 
