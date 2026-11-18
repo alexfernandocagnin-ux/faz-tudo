@@ -39,7 +39,7 @@ DEFAULT_LAYOUTS: dict[str, list[tuple[str, int]]] = {
 }
 
 REGISTRO = {"01": "BPA-C", "02": "BPA-I", "03": "AIH", "04": "AIH", "05": "AIH", "06": "APAC", "07": "APAC",
-            "08": "RAAS", "09": "RAAS"}
+            "08": "RAAS", "09": "RAAS", "10": "e-SUS APS"}
 FINANCIAMENTO = {"01": "PAB / Atenção Básica", "02": "Assistência Farmacêutica", "04": "FAEC", "05": "Incentivo - MAC",
                  "06": "MAC", "07": "Vigilância em Saúde", "": "SUS"}
 

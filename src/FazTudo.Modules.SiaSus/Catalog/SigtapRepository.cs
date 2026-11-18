@@ -539,6 +539,7 @@ public sealed class SigtapRepository
         "03" or "04" or "05" => "AIH",
         "06" or "07" => "APAC",
         "08" or "09" => "RAAS",
+        "10" => "e-SUS APS",
         _ => $"REG-{regCode}"
     };
 
