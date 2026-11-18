@@ -11,9 +11,39 @@ namespace FazTudo.Modules.SiaSus.Reports;
 /// <param name="IsAlternative">true = outra causa possível ("se o CBO estiver errado no CNES…").</param>
 public sealed record ResolvedArea(string Key, string Label, string Who, string Action, IReadOnlyList<string> Details, bool IsAlternative);
 
+/// <summary>Uma coisa a fazer, já respondida, para um responsável (área + estabelecimento).</summary>
+public sealed record ActionItem(string AreaKey, string Cnes, string CnesName, string Code, string Text);
+
+/// <summary>Tudo o que um responsável precisa fazer, com a mensagem pronta para mandar.</summary>
+public sealed class OwnerGroup
+{
+    public required string AreaKey { get; init; }
+    public required string AreaLabel { get; init; }
+    public required string Who { get; init; }
+    public required string Cnes { get; init; }
+    public required string CnesName { get; init; }
+    public List<ActionItem> Items { get; } = [];
+    public string Message { get; set; } = string.Empty;
+
+    public string Title => AreaKey switch
+    {
+        "BPA" => "Mandar para a unidade",
+        "APAC" => "Mandar para o prestador",
+        "CNES" => "Setor do CNES",
+        "FPO" => "Programação (FPO Magnético)",
+        "SIA" => "Aqui no SIA (CPD)",
+        _ => AreaLabel
+    };
+
+    public string Where => Cnes.Length > 0 ? $"{CnesName} · CNES {Cnes}" : AreaLabel;
+}
+
 /// <summary>Um tipo de ocorrência do relatório, explicado.</summary>
 public sealed class ProblemExplanation
 {
+    /// <summary>Respostas prontas (o que fazer), por estabelecimento.</summary>
+    public IReadOnlyList<ActionItem> Actions { get; set; } = [];
+
     public required string Code { get; init; }
     public required string Group { get; init; }
     public required string GroupMeaning { get; init; }
@@ -42,6 +72,8 @@ public sealed class SolverResult
     public required IReadOnlyList<ProblemExplanation> Problems { get; init; }
     public required string Headline { get; init; }
     public required IReadOnlyList<string> Notes { get; init; }
+    /// <summary>O que fazer, agrupado por responsável (estabelecimento + área).</summary>
+    public IReadOnlyList<OwnerGroup> Owners { get; init; } = [];
     public int TotalOccurrences => Problems.Sum(p => p.Quantity);
     public int EstablishmentCount => Report.Records.Select(r => r.Cnes).Distinct().Count();
 
@@ -51,6 +83,20 @@ public sealed class SolverResult
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Relatório de consistência do SIA — {Report.Orgao} — competência {Report.Competencia}");
         sb.AppendLine(Headline);
+        sb.AppendLine();
+        sb.AppendLine("O QUE FAZER, POR RESPONSÁVEL");
+        foreach (var g in Owners)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"▶ {g.AreaLabel} — CNES {g.Cnes} {g.CnesName}".TrimEnd());
+            foreach (var i in g.Items)
+            {
+                sb.AppendLine($"   • [{i.Code}] {i.Text}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("DETALHES DE CADA OCORRÊNCIA");
         var n = 1;
         foreach (var p in Problems)
         {
@@ -106,8 +152,11 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
 
     private static readonly Dictionary<string, int> GroupOrder = new() { ["GRV"] = 0, ["NOR"] = 1, ["AVS"] = 2, ["ACE"] = 3, ["ADV"] = 4 };
 
-    public SolverResult Solve(ConsistencyReport report)
+    private Dictionary<string, ApacMirror> _mirrors = [];
+
+    public SolverResult Solve(ConsistencyReport report, IReadOnlyList<ApacMirror>? mirrors = null)
     {
+        _mirrors = (mirrors ?? []).GroupBy(m => m.Number).ToDictionary(g => g.Key, g => g.Last());
         var problems = new List<ProblemExplanation>();
         var totals = report.Totals.Count > 0
             ? report.Totals
@@ -121,7 +170,7 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
                 ? knowledgeBase.FirstOrDefault(k => k.Id == id)
                 : null;
 
-            problems.Add(new ProblemExplanation
+            var problem = new ProblemExplanation
             {
                 Code = total.Code,
                 Group = total.Group,
@@ -134,7 +183,9 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
                 Steps = knowledge?.GuidedSteps ?? [],
                 Records = records,
                 Areas = ResolveAreas(knowledge, total, records)
-            });
+            };
+            problem.Actions = BuildActions(problem);
+            problems.Add(problem);
         }
 
         var ordered = problems
@@ -159,9 +210,218 @@ public sealed class ConsistencySolver(SigtapRepository sigtap, IReadOnlyList<Dia
                       "para eu dizer faixas de idade, quantidades máximas e CIDs aceitos de todos os procedimentos.");
         }
 
+        if (ordered.Any(p => p.Code == "ERRo") && _mirrors.Count == 0)
+        {
+            notes.Add("Dica: envie também o espelho das APACs (R0330T.OUT, \"Situação de Produção de APAC\") que eu digo " +
+                      "exatamente qual procedimento obrigatório ficou faltando em cada APAC.");
+        }
+
         notes.Add("Depois de corrigir na origem (prontuário, BPA-Mag, APAC-Mag, CNES ou FPO), reimporte e rode a consistência de novo.");
 
-        return new SolverResult { Report = report, Problems = ordered, Headline = headline, Notes = notes };
+        return new SolverResult
+        {
+            Report = report, Problems = ordered, Headline = headline, Notes = notes, Owners = BuildOwners(ordered, report)
+        };
+    }
+
+    // ---------------- Respostas prontas ----------------
+
+    private string Proc(string code)
+    {
+        var rule = sigtap.FindByCode(code);
+        return rule is null ? code : $"{rule.FormattedCode} {rule.Name}";
+    }
+
+    private List<ActionItem> BuildActions(ProblemExplanation p)
+    {
+        var area = p.MainArea?.Key ?? "BPA";
+        var groups = p.Records.GroupBy(r => (r.Cnes, r.CnesName)).ToList();
+        if (groups.Count == 0)
+        {
+            return [new ActionItem(area, string.Empty, string.Empty, p.Code, $"{p.Title}: {p.GroupMeaning}")];
+        }
+
+        return groups.SelectMany(g => Answer(p, g.ToList()).Select(t => new ActionItem(area, g.Key.Cnes, g.Key.CnesName, p.Code, t)))
+            .ToList();
+    }
+
+    private IEnumerable<string> Answer(ProblemExplanation p, List<OccurrenceRecord> recs)
+    {
+        var refs = recs.Select(r => r.Reference).Distinct().ToList();
+        var fichas = string.Join(", ", refs);
+        var kind = recs.Count == 1 ? "Ficha" : "Fichas";
+
+        switch (p.Code)
+        {
+            case "FET2":
+                foreach (var proc in recs.Select(r => r.ProcedureCode).Distinct())
+                {
+                    var procRefs = string.Join(", ", recs.Where(r => r.ProcedureCode == proc).Select(r => r.Reference));
+                    var rule = sigtap.FindByCode(proc);
+                    if (rule is null)
+                    {
+                        yield return $"Fichas {procRefs}: idade do paciente fora da faixa do procedimento {proc}. Confira a data de nascimento.";
+                        continue;
+                    }
+
+                    var text = $"Fichas {procRefs}: {rule.FormattedCode} ({rule.Name}) só aceita pacientes de {rule.AgeRangeDisplay}. " +
+                               "Confira a data de nascimento no cadastro";
+                    if (AgeAlternatives.TryGetValue(rule.Code, out var alt) && sigtap.FindByCode(alt.Code) is { } altRule)
+                    {
+                        text += $"; se estiver certa e o exame não for de rastreamento, lance como {altRule.FormattedCode} ({altRule.Name})";
+                    }
+
+                    yield return text + ".";
+                }
+
+                yield break;
+            case "ERR8":
+                yield return $"{kind} {fichas}: município de residência do paciente inválido. Corrigir o código IBGE do município " +
+                             "(6 dígitos, ex.: 350320 = Araraquara) no cadastro do paciente e reenviar a remessa.";
+                yield break;
+            case "ERRI":
+                yield return $"{kind} {fichas}: raça/cor do paciente inválida. Informar 01 Branca, 02 Preta, 03 Parda, 04 Amarela " +
+                             "ou 05 Indígena (a 05 exige o código da etnia).";
+                yield break;
+            case "ERRj":
+                yield return $"{kind} {fichas}: CPF do paciente com dígito verificador errado. Corrigir o CPF no cadastro " +
+                             "(ou informar o CNS válido do paciente).";
+                yield break;
+            case "ERRo":
+                foreach (var apac in refs)
+                {
+                    yield return AnswerSecondary(apac, recs.Where(r => r.Reference == apac).ToList());
+                }
+
+                yield break;
+            case "QTD2":
+                foreach (var r in recs)
+                {
+                    var rule = sigtap.FindByCode(r.ProcedureCode);
+                    var limit = rule is { MaxQuantity: > 0 } ? $"o máximo permitido no SIGTAP é {rule.MaxQuantity}" : "passou do máximo";
+                    yield return $"APAC {r.Reference} (comp. {r.Competencia}): {Proc(r.ProcedureCode)} — {limit}. " +
+                                 "Corrigir a quantidade lançada (ou remover a linha repetida).";
+                }
+
+                yield break;
+            case "9Q":
+                foreach (var r in recs)
+                {
+                    var rule = sigtap.FindByCode(r.ProcedureCode);
+                    var cids = rule is { AllowedCids.Count: > 0 } ? $" CIDs aceitos pelo SIGTAP: {Join(rule.AllowedCids.ToList(), 12)}." : string.Empty;
+                    yield return $"APAC {r.Reference}: o CID informado não é aceito para {Proc(r.ProcedureCode)}.{cids} " +
+                                 "Trocar pelo CID correto que estiver no laudo médico.";
+                }
+
+                yield break;
+            case "Y8":
+                foreach (var r in recs)
+                {
+                    var rule = sigtap.FindByCode(r.ProcedureCode);
+                    var fixedTwo = rule is null || sigtap.DetailTexts(rule).Any(d => d.Contains("2 competências", StringComparison.Ordinal));
+                    var ruleText = fixedTwo ? "o SIGTAP define validade fixa de 2 competências para esta APAC" : "a APAC tem validade de 2 competências";
+                    yield return $"APAC {r.Reference} (comp. {r.Competencia}, {Proc(r.ProcedureCode)}): {ruleText} e ela foi apresentada " +
+                                 "fora desse prazo. Não dá para cobrar nesta APAC; se o cuidado continua, é preciso emitir uma APAC nova.";
+                }
+
+                yield break;
+            case "67":
+            case "12":
+                const string fix = "Encerrar a APAC anterior com motivo de saída por mudança de procedimento, na competência em que a nova " +
+                                   "começou, e apresentar a nova como APAC inicial.";
+                const string repeated = " Como o procedimento mudou, a anterior precisa estar encerrada (mudança de procedimento) antes do " +
+                                        "início da nova, e a nova entra como APAC inicial.";
+                var batches = p.Code == "12" ? recs.Select(r => new List<OccurrenceRecord> { r }).ToList() : [recs];
+                foreach (var batch in batches)
+                {
+                    var prefix = p.Code == "12"
+                        ? $"APAC {batch[0].Reference}: apresentada como continuidade, mas na competência anterior não houve permanência no mesmo procedimento. "
+                        : string.Empty;
+                    var conflicts = DescribeApacConflicts(batch).ToList();
+                    foreach (var c in conflicts.Count > 0 ? conflicts : [string.Empty])
+                    {
+                        yield return $"{prefix}{c.Replace(repeated, string.Empty)} {fix}".Trim();
+                    }
+                }
+
+                yield break;
+            default:
+                var first = p.Steps.Count > 0 ? p.Steps[0].ActionTitle : p.GroupMeaning;
+                yield return $"{fichas}: {Capitalize(p.Description)}. {first}.";
+                yield break;
+        }
+    }
+
+    private string AnswerSecondary(string apac, List<OccurrenceRecord> recs)
+    {
+        var principal = recs.Count > 0 ? recs[0].ProcedureCode : string.Empty;
+        var obligatory = sigtap.FindByCode(principal)?.ObligatorySecondaries.ToList() ?? [];
+        var names = string.Join("; ", obligatory.Select(c => $"{Proc(c.Code)} (qtd. {c.Quantity})"));
+
+        if (_mirrors.TryGetValue(apac, out var mirror) && obligatory.Count > 0)
+        {
+            var launched = mirror.Items.Select(i => i.ProcedureCode).ToHashSet();
+            var missing = obligatory.Where(c => !launched.Contains(c.Code)).ToList();
+            var done = string.Join("; ", mirror.Items.Where(i => !i.ProcedureCode.StartsWith(principal[..Math.Min(9, principal.Length)], StringComparison.Ordinal))
+                .Select(i => Proc(i.ProcedureCode)));
+            if (missing.Count > 0)
+            {
+                var miss = string.Join("; ", missing.Select(c => $"{Proc(c.Code)} (qtd. {c.Quantity})"));
+                return $"APAC {apac} ({Proc(principal)}): FALTA lançar o secundário obrigatório {miss}. " +
+                       $"Já lançados: {(done.Length > 0 ? done : "nenhum")}. Incluir na APAC e reapresentar (se não foi realizado, a OCI não está completa).";
+            }
+
+            return $"APAC {apac} ({Proc(principal)}): todos os obrigatórios ({names}) estão lançados no espelho — confira a quantidade e o CBO de cada um.";
+        }
+
+        if (obligatory.Count > 0)
+        {
+            return $"APAC {apac} ({Proc(principal)}): o SIGTAP exige os secundários obrigatórios {names}. " +
+                   "Confira no espelho da APAC e inclua os que faltarem.";
+        }
+
+        return $"APAC {apac} ({Proc(principal)}): falta procedimento secundário obrigatório. " +
+               "Confira as compatibilidades obrigatórias do procedimento no SIGTAP e inclua na APAC.";
+    }
+
+    private static List<OwnerGroup> BuildOwners(List<ProblemExplanation> problems, ConsistencyReport report)
+    {
+        var groups = new Dictionary<(string, string), OwnerGroup>();
+        foreach (var a in problems.SelectMany(p => p.Actions))
+        {
+            if (!groups.TryGetValue((a.AreaKey, a.Cnes), out var g))
+            {
+                SiaErrorKnowledgeBase.Areas.TryGetValue(a.AreaKey, out var info);
+                g = new OwnerGroup
+                {
+                    AreaKey = a.AreaKey, AreaLabel = info?.Label ?? a.AreaKey, Who = info?.Who ?? string.Empty, Cnes = a.Cnes, CnesName = a.CnesName
+                };
+                groups[(a.AreaKey, a.Cnes)] = g;
+            }
+
+            g.Items.Add(a);
+        }
+
+        var order = new Dictionary<string, int> { ["BPA"] = 0, ["APAC"] = 1, ["CNES"] = 2, ["FPO"] = 3, ["SIA"] = 4 };
+        var result = groups.Values.OrderBy(g => order.GetValueOrDefault(g.AreaKey, 9)).ThenBy(g => g.CnesName).ToList();
+        foreach (var g in result)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Olá! Na consistência do SIA da competência {report.Competencia}, a produção do " +
+                          $"{(g.CnesName.Length > 0 ? g.CnesName : "estabelecimento")} (CNES {g.Cnes}) teve estes problemas:");
+            sb.AppendLine();
+            var n = 1;
+            foreach (var i in g.Items)
+            {
+                sb.AppendLine($"{n++}. {i.Text}");
+            }
+
+            sb.AppendLine();
+            sb.Append("Por favor, corrijam no sistema de origem e reenviem a remessa. Qualquer dúvida, falem com o CPD.");
+            g.Message = sb.ToString();
+        }
+
+        return result;
     }
 
     private List<string> BuildFindings(string code, List<OccurrenceRecord> records, bool unknownCode, int quantity)

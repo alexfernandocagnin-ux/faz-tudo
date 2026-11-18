@@ -25,24 +25,27 @@ public partial class SolverView : UserControl
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Abrir relatório de ocorrências da consistência (R0350.OUT)",
+            Title = "Escolha o R0350.OUT (e, se tiver erro de APAC, também o R0330T.OUT)",
             Filter = "Relatórios do SIA (*.OUT;*.TXT)|*.OUT;*.TXT|Todos os arquivos (*.*)|*.*",
-            InitialDirectory = Directory.Exists(DefaultSiaFolder) ? DefaultSiaFolder : string.Empty
+            InitialDirectory = Directory.Exists(DefaultSiaFolder) ? DefaultSiaFolder : string.Empty,
+            Multiselect = true
         };
         if (dialog.ShowDialog(Window.GetWindow(this)) == true)
         {
-            _ = SolveAsync(dialog.FileName);
+            _ = SolveAsync(dialog.FileNames);
         }
     }
 
-    public async Task SolveAsync(string path)
+    public Task SolveAsync(string path) => SolveAsync([path]);
+
+    public async Task SolveAsync(IReadOnlyList<string> paths)
     {
         ChooseButton.IsEnabled = false;
         ChooseButtonText.Text = "Lendo…";
         Mouse.OverrideCursor = Cursors.Wait;
         try
         {
-            var result = await Task.Run(() => _services.Sia.SolveConsistencyReport(path));
+            var result = await Task.Run(() => _services.Sia.SolveFiles(paths));
             Show(result);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -94,8 +97,31 @@ public partial class SolverView : UserControl
             GroupPills.Children.Add(pill);
         }
 
-        NotesList.ItemsSource = result.Notes;
+        NotesList.ItemsSource = result.Notes.Take(Math.Max(0, result.Notes.Count - 1)).ToList();
+        OwnersList.ItemsSource = result.Owners;
         ProblemsList.ItemsSource = result.Problems;
+    }
+
+    private void CopyMessage_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string message } button && message.Length > 0)
+        {
+            Clipboard.SetText(message);
+            var label = (button.Content as StackPanel)?.Children.OfType<TextBlock>().LastOrDefault();
+            if (label is null)
+            {
+                return;
+            }
+
+            label.Text = "Copiada!";
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            timer.Tick += (_, _) =>
+            {
+                label.Text = "Copiar mensagem";
+                timer.Stop();
+            };
+            timer.Start();
+        }
     }
 
     private void Copy_Click(object sender, RoutedEventArgs e)
@@ -139,9 +165,13 @@ public partial class SolverView : UserControl
     private void View_Drop(object sender, DragEventArgs e)
     {
         ResetDropZone();
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files && File.Exists(files[0]))
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
         {
-            _ = SolveAsync(files[0]);
+            var existing = files.Where(File.Exists).ToList();
+            if (existing.Count > 0)
+            {
+                _ = SolveAsync(existing);
+            }
         }
     }
 
@@ -149,6 +179,6 @@ public partial class SolverView : UserControl
     {
         DropOutline.Stroke = (Brush)FindResource("LineStrongBrush");
         DropOutline.Fill = Brushes.Transparent;
-        DropTitle.Text = "Arraste o relatório do SIA para cá";
+        DropTitle.Text = "Arraste os relatórios do SIA para cá";
     }
 }

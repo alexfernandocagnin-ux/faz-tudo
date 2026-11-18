@@ -28,7 +28,7 @@
             <StackPanel>
                 <TextBlock Text="Solucionador SIA" Style="{StaticResource H1}"/>
                 <TextBlock Style="{StaticResource Lead}" Margin="0,6,0,0"
-                           Text="Mande o relatório de ocorrências da consistência do SIA e eu explico, problema por problema, como resolver."/>
+                           Text="Envie o relatório de erros da consistência do SIA e receba, pronto, o que cada estabelecimento precisa corrigir — com a mensagem para mandar."/>
             </StackPanel>
         </DockPanel>
 
@@ -41,9 +41,9 @@
                     <Border Width="72" Height="72" CornerRadius="20" Background="{StaticResource AccentSoftBrush}" HorizontalAlignment="Center">
                         <TextBlock Text="&#xEA80;" Style="{StaticResource Icon}" FontSize="30" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center"/>
                     </Border>
-                    <TextBlock x:Name="DropTitle" Text="Arraste o relatório do SIA para cá" Style="{StaticResource H2}" TextAlignment="Center" Margin="0,22,0,0"/>
+                    <TextBlock x:Name="DropTitle" Text="Arraste os relatórios do SIA para cá" Style="{StaticResource H2}" TextAlignment="Center" Margin="0,22,0,0"/>
                     <TextBlock Style="{StaticResource Lead}" TextAlignment="Center" Margin="0,8,0,22"
-                               Text="É o R0350.OUT, gerado na consistência. Fica na pasta do processamento do SIA, por exemplo C:\Datasus\SIA\SIA_2026_10_Processamento."/>
+                               Text="O R0350.OUT (erros da consistência) e, se houver erro de APAC, também o R0330T.OUT (espelho das APACs). Ficam na pasta do processamento do SIA, ex.: C:\Datasus\SIA\SIA_2026_10_Processamento."/>
                     <Button x:Name="ChooseButton" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Click="ChooseFile_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE8E5;" Style="{StaticResource Icon}" FontSize="14"/>
@@ -99,6 +99,59 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!-- O que fazer, por responsável -->
+                <TextBlock Text="O que fazer" Style="{StaticResource H2}" Margin="0,6,0,10"/>
+                <ItemsControl x:Name="OwnersList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Card}" Padding="22,18" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" VerticalAlignment="Top" Style="{StaticResource SecondaryButton}"
+                                                Tag="{Binding Message}" Click="CopyMessage_Click"
+                                                ToolTip="Copia a mensagem pronta para mandar a este responsável">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE724;" Style="{StaticResource Icon}" FontSize="14"/>
+                                                <TextBlock Text="Copiar mensagem" Margin="8,0,0,0"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Border Width="52" Height="52" CornerRadius="12" Background="{StaticResource AccentBrush}" VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding AreaKey}" Foreground="White" FontWeight="Bold" FontSize="13"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Margin="14,0,14,0">
+                                            <TextBlock Text="{Binding Title}" Style="{StaticResource Overline}" Foreground="{StaticResource AccentHoverBrush}"/>
+                                            <TextBlock Text="{Binding Where}" Style="{StaticResource H3}" FontSize="16" Margin="0,2,0,0"/>
+                                            <TextBlock Text="{Binding Who}" Style="{StaticResource Caption}" FontSize="12" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <ItemsControl ItemsSource="{Binding Items}" Margin="0,14,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="70"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Style="{StaticResource Pill}" Background="{StaticResource DangerSoftBrush}" VerticalAlignment="Top">
+                                                        <TextBlock Text="{Binding Code}" Style="{StaticResource Mono}" FontSize="11.5" FontWeight="Bold"
+                                                                   Foreground="{StaticResource DangerBrush}"/>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Text}" Style="{StaticResource Body}"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="Detalhes de cada erro" Style="{StaticResource H2}" Margin="0,18,0,4"/>
+                <TextBlock Text="Para quem quer entender o porquê. Para corrigir, a lista acima já basta." Style="{StaticResource Caption}"
+                           FontSize="12.5" Margin="0,0,0,12"/>
 
                 <!-- Problemas -->
                 <ItemsControl x:Name="ProblemsList">

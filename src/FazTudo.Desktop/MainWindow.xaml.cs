@@ -62,17 +62,17 @@ public partial class MainWindow : Window
             var files = args.Skip(2).ToList();
             await CaptureAllAsync(args[1],
                 files.FirstOrDefault(f => !IsSiaReport(f)),
-                files.FirstOrDefault(IsSiaReport));
+                files.Where(IsSiaReport).ToList());
             Close();
             return;
         }
 
-        if (args.Length == 1 && File.Exists(args[0]))
+        if (args.Length >= 1 && args.All(File.Exists))
         {
-            if (IsSiaReport(args[0]))
+            if (args.All(IsSiaReport))
             {
                 NavSolver.IsChecked = true;
-                await _solver.SolveAsync(args[0]);
+                await _solver.SolveAsync(args);
             }
             else
             {
@@ -84,7 +84,7 @@ public partial class MainWindow : Window
 
     private static bool IsSiaReport(string path) => path.EndsWith(".OUT", StringComparison.OrdinalIgnoreCase);
 
-    private async Task CaptureAllAsync(string folder, string? sampleBpa, string? sampleReport)
+    private async Task CaptureAllAsync(string folder, string? sampleBpa, IReadOnlyList<string> sampleReports)
     {
         Directory.CreateDirectory(folder);
         async Task Snap(string name)
@@ -104,9 +104,9 @@ public partial class MainWindow : Window
         }
 
         NavSolver.IsChecked = true; await Snap("0-solucionador-vazio");
-        if (sampleReport is not null && File.Exists(sampleReport))
+        if (sampleReports.Count > 0)
         {
-            await _solver.SolveAsync(sampleReport);
+            await _solver.SolveAsync(sampleReports);
             await Snap("0-solucionador-resposta");
         }
 

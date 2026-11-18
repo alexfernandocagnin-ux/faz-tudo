@@ -1,4 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- Tabela SIGTAP padrão do projeto (a mesma do site): o programa já abre com a tabela oficial. -->
+    <None Include="..\..\shared\sigtap\*.*" Link="sigtap\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\FazTudo.Core\FazTudo.Core.csproj" />

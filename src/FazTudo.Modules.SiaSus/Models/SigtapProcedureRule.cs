@@ -1,7 +1,26 @@
 namespace FazTudo.Modules.SiaSus.Models;
 
+/// <summary>Procedimento secundário previsto para um principal (rl_procedimento_compativel).</summary>
+/// <param name="Type">TP_COMPATIBILIDADE; "5" = Obrigatória (APAC principal x APAC secundário).</param>
+public sealed record SigtapCompatible(string Code, int Quantity, string Type)
+{
+    public const string Obligatory = "5";
+    public bool IsObligatory => Type == Obligatory;
+}
+
 public sealed class SigtapProcedureRule
 {
+    /// <summary>Secundários previstos no SIGTAP (os de tipo 5 são obrigatórios na APAC).</summary>
+    public IReadOnlyList<SigtapCompatible> Compatibles { get; init; } = [];
+
+    /// <summary>Códigos de tb_regra_condicionada vinculados ao procedimento.</summary>
+    public IReadOnlyList<string> ConditionedRules { get; init; } = [];
+
+    /// <summary>Códigos de tb_detalhe (ex.: "APAC com validade fixa de 2 competências").</summary>
+    public IReadOnlyList<string> Details { get; init; } = [];
+
+    public IEnumerable<SigtapCompatible> ObligatorySecondaries => Compatibles.Where(c => c.IsObligatory);
+
     public required string Code { get; init; }
     public required string Name { get; init; }
     public required string SexRestriction { get; init; } // I = Indiferente, F = Feminino, M = Masculino

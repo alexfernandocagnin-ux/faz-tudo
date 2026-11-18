@@ -21,6 +21,25 @@ public sealed class SigtapRepository
     /// <summary>true depois de importar a tabela oficial; até lá só existe a base de exemplo.</summary>
     public bool IsOfficialTableLoaded { get; private set; }
 
+    /// <summary>Competência da tabela carregada (AAAAMM); vazio na base de exemplo.</summary>
+    public string Competencia { get; private set; } = string.Empty;
+
+    public string CompetenciaDisplay => Competencia.Length == 6 ? $"{Competencia[4..]}/{Competencia[..4]}" : Competencia;
+
+    /// <summary>tb_regra_condicionada: código → (nome, descrição).</summary>
+    public IReadOnlyDictionary<string, RuleText> RuleNames { get; private set; } = new Dictionary<string, RuleText>();
+
+    /// <summary>tb_detalhe: código → nome (ex.: "APAC com validade fixa de 2 competências.").</summary>
+    public IReadOnlyDictionary<string, string> DetailNames { get; private set; } = new Dictionary<string, string>();
+
+    public sealed record RuleText(string Name, string Description);
+
+    public IReadOnlyList<string> DetailTexts(SigtapProcedureRule rule) =>
+        rule.Details.Where(DetailNames.ContainsKey).Select(d => DetailNames[d]).ToList();
+
+    public IReadOnlyList<RuleText> RuleTexts(SigtapProcedureRule rule) =>
+        rule.ConditionedRules.Where(RuleNames.ContainsKey).Select(r => RuleNames[r]).ToList();
+
     public SigtapRepository()
     {
         foreach (var seed in GetBuiltInSeed())
@@ -100,6 +119,18 @@ public sealed class SigtapRepository
     private static readonly (string Name, int Length)[] DefaultCidLayout =
         [("CO_PROCEDIMENTO", 10), ("CO_CID", 4), ("ST_PRINCIPAL", 1), ("DT_COMPETENCIA", 6)];
 
+    private static readonly (string Name, int Length)[] DefaultCompativelLayout =
+    [
+        ("CO_PROCEDIMENTO_PRINCIPAL", 10), ("CO_REGISTRO_PRINCIPAL", 2), ("CO_PROCEDIMENTO_COMPATIVEL", 10),
+        ("CO_REGISTRO_COMPATIVEL", 2), ("TP_COMPATIBILIDADE", 1), ("QT_PERMITIDA", 4), ("DT_COMPETENCIA", 6)
+    ];
+
+    private static readonly (string Name, int Length)[] DefaultRegraCondLayout = [("CO_PROCEDIMENTO", 10), ("CO_REGRA_CONDICIONADA", 4)];
+    private static readonly (string Name, int Length)[] DefaultTbRegraLayout =
+        [("CO_REGRA_CONDICIONADA", 4), ("NO_REGRA_CONDICIONADA", 150), ("DS_REGRA_CONDICIONADA", 4000)];
+    private static readonly (string Name, int Length)[] DefaultDetalheLayout = [("CO_PROCEDIMENTO", 10), ("CO_DETALHE", 3), ("DT_COMPETENCIA", 6)];
+    private static readonly (string Name, int Length)[] DefaultTbDetalheLayout = [("CO_DETALHE", 3), ("NO_DETALHE", 100), ("DT_COMPETENCIA", 6)];
+
     /// <summary>
     /// Importa o SIGTAP a partir do zip baixado do DATASUS (TabelaUnificada_AAAAMM_*.zip) ou da pasta já descompactada.
     /// </summary>
@@ -161,6 +192,10 @@ public sealed class SigtapRepository
         var cidMap = ReadRelation(folderPath, "rl_procedimento_cid", DefaultCidLayout, "CO_CID", latin1, NormalizeCid,
             (layout, line) => layout.Read(line, "ST_PRINCIPAL") is "" or "S");
 
+        var ruleMap = ReadRelation(folderPath, "rl_procedimento_regra_cond", DefaultRegraCondLayout, "CO_REGRA_CONDICIONADA", latin1, c => c);
+        var detailMap = ReadRelation(folderPath, "rl_procedimento_detalhe", DefaultDetalheLayout, "CO_DETALHE", latin1, c => c);
+        var compatMap = ReadCompatibles(folderPath, latin1);
+
         var layout = SigtapLayout.Load(folderPath, "tb_procedimento", DefaultProcedimentoLayout, latin1);
         var imported = new Dictionary<string, SigtapProcedureRule>(StringComparer.OrdinalIgnoreCase);
         var competenciaDetected = string.Empty;
@@ -203,7 +238,7 @@ public sealed class SigtapRepository
             imported[code] = new SigtapProcedureRule
             {
                 Code = code,
-                Name = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(name.ToLowerInvariant()),
+                Name = TitlePt(name),
                 SexRestriction = sex is "M" or "F" ? sex : "I", // I = Indiferente, N = Não se aplica
                 MinAgeMonths = Math.Max(0, minAgeMonths),
                 MaxAgeMonths = !hasMaxAge || maxAgeMonths <= 0 || maxAgeMonths >= 9999 ? 9999 : maxAgeMonths,
@@ -213,7 +248,10 @@ public sealed class SigtapRepository
                 AllowedCids = cids,
                 MaxQuantity = Math.Max(0, maxQuantity),
                 UnitValue = vlSaCents / 100m,
-                Financing = MapFinanciamento(financingCode)
+                Financing = MapFinanciamento(financingCode),
+                Compatibles = compatMap.TryGetValue(code, out var compat) ? compat : [],
+                ConditionedRules = ruleMap.TryGetValue(code, out var rules) ? rules.OrderBy(x => x).ToList() : [],
+                Details = detailMap.TryGetValue(code, out var details) ? details.OrderBy(x => x).ToList() : []
             };
         }
 
@@ -225,6 +263,13 @@ public sealed class SigtapRepository
         // Substitui a base inteira: a tabela oficial não se mistura com a base de exemplo.
         _procedures = imported;
         IsOfficialTableLoaded = true;
+        Competencia = competenciaDetected;
+        RuleNames = ReadNames(folderPath, "tb_regra_condicionada", DefaultTbRegraLayout, latin1,
+            (l, line) => (l.Read(line, "CO_REGRA_CONDICIONADA"),
+                          new RuleText(TitlePt(l.Read(line, "NO_REGRA_CONDICIONADA")).Replace("Secudários", "Secundários"),
+                                       l.Read(line, "DS_REGRA_CONDICIONADA"))));
+        DetailNames = ReadNames(folderPath, "tb_detalhe", DefaultTbDetalheLayout, latin1,
+            (l, line) => (l.Read(line, "CO_DETALHE"), l.Read(line, "NO_DETALHE")));
         LoadedSourceLabel = string.IsNullOrEmpty(competenciaDetected)
             ? $"SIGTAP oficial ({imported.Count:N0} procedimentos)"
             : $"SIGTAP oficial competência {competenciaDetected[4..]}/{competenciaDetected[..4]} ({imported.Count:N0} procedimentos)";
@@ -270,15 +315,103 @@ public sealed class SigtapRepository
         return map;
     }
 
+    private static Dictionary<string, List<SigtapCompatible>> ReadCompatibles(string folderPath, Encoding encoding)
+    {
+        var map = new Dictionary<string, List<SigtapCompatible>>(StringComparer.OrdinalIgnoreCase);
+        var file = Path.Combine(folderPath, "rl_procedimento_compativel.txt");
+        if (!File.Exists(file))
+        {
+            return map;
+        }
+
+        var layout = SigtapLayout.Load(folderPath, "rl_procedimento_compativel", DefaultCompativelLayout, encoding);
+        foreach (var line in File.ReadLines(file, encoding))
+        {
+            var principal = layout.Read(line, "CO_PROCEDIMENTO_PRINCIPAL");
+            var secondary = layout.Read(line, "CO_PROCEDIMENTO_COMPATIVEL");
+            if (principal.Length != 10 || secondary.Length != 10)
+            {
+                continue;
+            }
+
+            int.TryParse(layout.Read(line, "QT_PERMITIDA"), out var qty);
+            var entry = new SigtapCompatible(secondary, qty, layout.Read(line, "TP_COMPATIBILIDADE"));
+            if (!map.TryGetValue(principal, out var list))
+            {
+                list = [];
+                map[principal] = list;
+            }
+
+            if (!list.Contains(entry))
+            {
+                list.Add(entry);
+            }
+        }
+
+        return map;
+    }
+
+    private static Dictionary<string, T> ReadNames<T>(string folderPath, string table, IReadOnlyList<(string Name, int Length)> defaultLayout,
+        Encoding encoding, Func<SigtapLayout, string, (string Key, T Value)> read)
+    {
+        var map = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+        var file = Path.Combine(folderPath, $"{table}.txt");
+        if (!File.Exists(file))
+        {
+            return map;
+        }
+
+        var layout = SigtapLayout.Load(folderPath, table, defaultLayout, encoding);
+        foreach (var line in File.ReadLines(file, encoding))
+        {
+            var (key, value) = read(layout, line);
+            if (key.Length > 0)
+            {
+                map[key] = value;
+            }
+        }
+
+        return map;
+    }
+
+    private static readonly HashSet<string> LowerWords = new(StringComparer.Ordinal)
+    {
+        "de", "da", "do", "das", "dos", "e", "em", "na", "no", "nas", "nos", "a", "o", "as", "os", "com", "por", "para", "p/",
+        "ou", "ao", "aos", "à", "às", "x"
+    };
+
+    private static readonly HashSet<string> UpperWords = new(StringComparer.Ordinal)
+    {
+        "oci", "apac", "sus", "cid", "hiv", "aids", "cdk", "ii", "iii", "iv", "vi", "vii", "viii", "ix", "uti", "utin", "caps",
+        "rx", "pet-ct", "dna", "rna", "pcr", "ivas", "dst", "ist", "tb"
+    };
+
+    /// <summary>"CONSULTA MEDICA EM ATENCAO ESPECIALIZADA" → "Consulta Medica em Atencao Especializada" (siglas em maiúsculas).</summary>
+    public static string TitlePt(string text)
+    {
+        var words = text.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(' ', words.Select((w, i) =>
+        {
+            var core = w.Trim('(', ')', '-', ',', '.', ';', ':', '/');
+            if (UpperWords.Contains(core))
+            {
+                return w.ToUpperInvariant();
+            }
+
+            return i > 0 && LowerWords.Contains(w) ? w : char.ToUpperInvariant(w[0]) + w[1..];
+        }));
+    }
+
     /// <summary>"C50.9" / "c509 " → "C509".</summary>
     public static string NormalizeCid(string? cid) =>
         new string((cid ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
 
     // ---------------- Cache em disco ----------------
 
-    private sealed record CacheFile(int Version, string Label, List<SigtapProcedureRule> Procedures);
+    private sealed record CacheFile(int Version, string Label, string Competencia, List<SigtapProcedureRule> Procedures,
+        Dictionary<string, RuleText> RuleNames, Dictionary<string, string> DetailNames);
 
-    private const int CacheVersion = 2;
+    private const int CacheVersion = 3;
 
     /// <summary>Grava a tabela oficial carregada para ser reaberta na próxima execução sem reimportar.</summary>
     public void SaveCache(string path)
@@ -292,10 +425,80 @@ public sealed class SigtapRepository
         var temp = path + ".tmp";
         using (var stream = File.Create(temp))
         {
-            JsonSerializer.Serialize(stream, new CacheFile(CacheVersion, LoadedSourceLabel, _procedures.Values.ToList()));
+            JsonSerializer.Serialize(stream, new CacheFile(CacheVersion, LoadedSourceLabel, Competencia, _procedures.Values.ToList(),
+                RuleNames.ToDictionary(), DetailNames.ToDictionary()));
         }
 
         File.Move(temp, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Carrega a tabela padrão do projeto (shared/sigtap/sigtap-AAAAMM.json.gz), a mesma que o site usa.
+    /// O arquivo é gerado pelo web/tools/preparar_sigtap.py (JSON em snake_case, compactado com gzip).
+    /// </summary>
+    public bool TryLoadSharedBundle(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var file = File.OpenRead(path);
+            using var gzip = new GZipStream(file, CompressionMode.Decompress);
+            var root = System.Text.Json.Nodes.JsonNode.Parse(gzip)!.AsObject();
+
+            static List<string> Strings(System.Text.Json.Nodes.JsonNode? node) =>
+                node?.AsArray().Select(n => n!.GetValue<string>()).ToList() ?? [];
+
+            var procedures = new Dictionary<string, SigtapProcedureRule>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in root["procedures"]!.AsArray())
+            {
+                var p = item!.AsObject();
+                var code = p["code"]!.GetValue<string>();
+                procedures[code] = new SigtapProcedureRule
+                {
+                    Code = code,
+                    Name = p["name"]!.GetValue<string>(),
+                    SexRestriction = p["sex_restriction"]!.GetValue<string>(),
+                    MinAgeMonths = p["min_age_months"]!.GetValue<int>(),
+                    MaxAgeMonths = p["max_age_months"]!.GetValue<int>(),
+                    AllowedInstruments = Strings(p["allowed_instruments"]),
+                    AllowedCbos = Strings(p["allowed_cbos"]),
+                    RequiresCid = p["requires_cid"]!.GetValue<bool>(),
+                    UnitValue = decimal.Parse(p["unit_value"]!.GetValue<string>(), CultureInfo.InvariantCulture),
+                    Financing = p["financing"]!.GetValue<string>(),
+                    RequiredServiceClassification = p["required_service_classification"]?.GetValue<string>() ?? string.Empty,
+                    AllowedCids = Strings(p["allowed_cids"]),
+                    MaxQuantity = p["max_quantity"]?.GetValue<int>() ?? 0,
+                    Compatibles = p["compatibles"]?.AsArray()
+                        .Select(c => new SigtapCompatible(c![0]!.GetValue<string>(), c[1]!.GetValue<int>(), c[2]!.GetValue<string>()))
+                        .ToList() ?? [],
+                    ConditionedRules = Strings(p["conditioned_rules"]),
+                    Details = Strings(p["details"])
+                };
+            }
+
+            if (procedures.Count == 0)
+            {
+                return false;
+            }
+
+            _procedures = procedures;
+            LoadedSourceLabel = root["label"]?.GetValue<string>() ?? "SIGTAP oficial";
+            Competencia = root["competencia"]?.GetValue<string>() ?? string.Empty;
+            RuleNames = root["rule_names"]?.AsObject().ToDictionary(
+                kv => kv.Key, kv => new RuleText(kv.Value![0]!.GetValue<string>(), kv.Value[1]!.GetValue<string>())) ?? [];
+            DetailNames = root["detail_names"]?.AsObject().ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>()) ?? [];
+            IsOfficialTableLoaded = true;
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException or InvalidOperationException
+                                       or FormatException or NullReferenceException or KeyNotFoundException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Carrega a tabela salva por SaveCache. Arquivo ausente, de outra versão ou corrompido → false (fica a base atual).</summary>
@@ -317,6 +520,9 @@ public sealed class SigtapRepository
 
             _procedures = cache.Procedures.ToDictionary(p => p.Code, StringComparer.OrdinalIgnoreCase);
             LoadedSourceLabel = cache.Label;
+            Competencia = cache.Competencia ?? string.Empty;
+            RuleNames = cache.RuleNames ?? [];
+            DetailNames = cache.DetailNames ?? [];
             IsOfficialTableLoaded = true;
             return true;
         }
