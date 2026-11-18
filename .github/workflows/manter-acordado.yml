@@ -1,0 +1,39 @@
+# Mantém o site do Conserta SIA (Streamlit Community Cloud) acordado.
+# A cada 6 horas abre o site num navegador; se o app estiver dormindo, clica para acordar.
+# Também dá para rodar na mão: GitHub → Actions → "Manter o site acordado" → Run workflow.
+name: Manter o site acordado
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # 4x por dia (horário UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acordar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar navegador
+        run: |
+          pip install playwright==1.49.0
+          python -m playwright install --with-deps chromium
+
+      - name: Abrir o site (e acordar se precisar)
+        run: python .github/scripts/acordar_site.py
+
+      - name: Guardar print se falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: print-do-site
+          path: site.png
+          if-no-files-found: ignore
