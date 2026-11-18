@@ -10,7 +10,7 @@ import sys
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("SITE_URL", "https://faz-tudo-sia.streamlit.app/")
+URL = os.environ.get("SITE_URL", "https://conserta-sia.streamlit.app/")
 APP_TEXT = "Solucionador SIA"  # aparece quando o app carregou
 WAKE_BUTTONS = ["Yes, get this app back up", "Sim, reative este aplicativo", "get this app back up"]
 
