@@ -17,7 +17,6 @@ from . import SHARED_DIR
 from .text import normalize, terms
 from .validators import normalize_procedure_code
 
-OFFICIAL_BUNDLE = SHARED_DIR / "sigtap" / "sigtap-oficial.json.gz"
 
 DEFAULT_LAYOUTS: dict[str, list[tuple[str, int]]] = {
     "tb_procedimento": [
@@ -151,13 +150,21 @@ class _Layout:
 
 
 class SigtapRepository:
-    def __init__(self, procedures: dict[str, SigtapRule] | None = None, label: str | None = None, official: bool = False):
+    def __init__(self, procedures: dict[str, SigtapRule] | None = None, label: str | None = None, official: bool = False,
+                 competencia: str = "", version: str = ""):
         if procedures is None:
             procedures = load_seed()
             label = "Base de exemplo embarcada (importe a tabela oficial do SIGTAP)"
         self.procedures = procedures
         self.label = label or ""
         self.is_official = official
+        self.competencia = competencia  # AAAAMM
+        self.version = version
+
+    @property
+    def competencia_display(self) -> str:
+        c = self.competencia
+        return f"{c[4:]}/{c[:4]}" if len(c) == 6 else c
 
     # ------------------------------------------------------------ consulta
     def find(self, raw_code: str | None) -> SigtapRule | None:
@@ -248,7 +255,7 @@ class SigtapRepository:
             max_age = num("VL_IDADE_MAXIMA")
             procedures[code] = SigtapRule(
                 code=code,
-                name=layout.read(line, "NO_PROCEDIMENTO").lower().title(),
+                name=title_pt(layout.read(line, "NO_PROCEDIMENTO")),
                 sex_restriction=sex if sex in ("F", "M") else "I",
                 min_age_months=num("VL_IDADE_MINIMA"),
                 max_age_months=9999 if max_age <= 0 or max_age >= 9999 else max_age,
@@ -264,32 +271,44 @@ class SigtapRepository:
 
         if not procedures:
             raise ValueError("Nenhum procedimento válido em 'tb_procedimento.txt'.")
-        label = (f"SIGTAP oficial competência {competencia[4:]}/{competencia[:4]} ({len(procedures):,} procedimentos)"
-                 if competencia else f"SIGTAP oficial ({len(procedures):,} procedimentos)").replace(",", ".")
-        return SigtapRepository(procedures, label, official=True)
+        return SigtapRepository(procedures, _official_label(competencia, len(procedures)), official=True,
+                                competencia=competencia)
 
-    # ------------------------------------------------------------ pacote pronto (para o app sempre abrir com a oficial)
+    # ------------------------------------------------------------ pacote pronto (json.gz, carrega em segundos)
     def to_bundle(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"label": self.label, "procedures": [p.to_json() for p in self.procedures.values()]}
-        with gzip.open(path, "wt", encoding="utf-8") as fh:
+        payload = {"label": self.label, "competencia": self.competencia, "version": self.version,
+                   "procedures": [p.to_json() for p in self.procedures.values()]}
+        temp = path.with_suffix(path.suffix + ".tmp")
+        with gzip.open(temp, "wt", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False)
+        temp.replace(path)
 
     @staticmethod
     def from_bundle(path: Path) -> "SigtapRepository":
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             payload = json.load(fh)
         procs = {p["code"]: SigtapRule.from_json(p) for p in payload["procedures"]}
-        return SigtapRepository(procs, payload["label"], official=True)
+        return SigtapRepository(procs, payload["label"], official=True, competencia=payload.get("competencia", ""),
+                                version=payload.get("version", ""))
+
+
+def _official_label(competencia: str, count: int) -> str:
+    text = (f"SIGTAP oficial competência {competencia[4:]}/{competencia[:4]} ({count:,} procedimentos)"
+            if competencia else f"SIGTAP oficial ({count:,} procedimentos)")
+    return text.replace(",", ".")
+
+
+_LOWER_WORDS = {"de", "da", "do", "das", "dos", "e", "em", "na", "no", "nas", "nos", "a", "o", "as", "os", "com", "por",
+                "para", "p/", "ou", "ao", "aos", "à", "às", "x"}
+
+
+def title_pt(text: str) -> str:
+    """'CONSULTA MEDICA EM ATENCAO ESPECIALIZADA' → 'Consulta Medica em Atencao Especializada'."""
+    words = text.lower().split()
+    return " ".join(w if (i > 0 and w in _LOWER_WORDS) else w[:1].upper() + w[1:] for i, w in enumerate(words))
 
 
 def load_seed() -> dict[str, SigtapRule]:
     raw = json.loads((SHARED_DIR / "sigtap-exemplo.json").read_text(encoding="utf-8"))
     return {p["code"]: _rule_from_seed(p) for p in raw["procedures"]}
-
-
-def default_repository() -> SigtapRepository:
-    """A tabela oficial empacotada em shared/sigtap (se alguém gerou) ou a base de exemplo."""
-    if OFFICIAL_BUNDLE.exists():
-        return SigtapRepository.from_bundle(OFFICIAL_BUNDLE)
-    return SigtapRepository()

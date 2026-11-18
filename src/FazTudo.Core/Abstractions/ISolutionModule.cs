@@ -10,7 +10,7 @@ public enum ModuleStage
 }
 
 /// <summary>
-/// Contrato central da plataforma expansível ("Faz Tudo").
+/// Contrato central da plataforma expansível ("Conserta SIA · CPD").
 /// Qualquer nova área (SIA/SUS, SIHD/AIH, SCNES, TISS/TUSS, Fiscal/SPED, etc.)
 /// implementa esta interface para se integrar automaticamente ao Shell, à busca global e à Central de Módulos.
 /// </summary>

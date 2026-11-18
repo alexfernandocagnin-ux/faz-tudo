@@ -1,4 +1,4 @@
-# Faz Tudo — faturamento SIA/SUS sem glosa
+# Conserta SIA · CPD — faturamento SIA/SUS sem glosa
 
 Ferramenta para quem fecha a produção ambulatorial do SUS: lê o relatório de erros do SIA e diz, problema por
 problema, **onde se resolve** (BPA, APAC, CNES, FPO ou no próprio SIA), **para qual estabelecimento mandar** e
@@ -30,11 +30,20 @@ web\.venv\Scripts\pip install -r web\requirements.txt
 web\.venv\Scripts\streamlit run web\app.py
 ```
 
-**Tabela SIGTAP oficial sempre carregada:** rode uma vez por competência e publique o arquivo gerado em `shared/sigtap/`:
+## Tabelas SIGTAP
+
+O site procura tabelas novas no FTP do DATASUS a cada 6 horas e **baixa sozinho**, mas **só troca a tabela em uso
+quando alguém escolhe** (Consultor SIGTAP → *Usar esta*). A escolha vale para todos que usam o site.
+
+Quando o servidor reinicia (o Streamlit Cloud reinicia ao "acordar"), vale a **tabela padrão do projeto**, gravada em
+`shared/sigtap/`. Para trocar o padrão (baixa do DATASUS e grava):
 
 ```powershell
-web\.venv\Scripts\python web\tools\preparar_sigtap.py TabelaUnificada_AAAAMM.zip
+web\.venv\Scripts\python web\tools\preparar_sigtap.py 202612
 ```
+
+Depois, commit + push da pasta `shared/sigtap/`. Para exigir senha na troca da tabela em uso, cadastre `senha_cpd` nos
+*Secrets* do app no Streamlit Cloud.
 
 ## Privacidade
 
