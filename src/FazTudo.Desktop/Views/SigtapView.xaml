@@ -1,0 +1,123 @@
+<UserControl x:Class="FazTudo.Desktop.Views.SigtapView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AllowDrop="True" Background="Transparent" DragOver="View_DragOver" Drop="View_Drop">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,4,0,20">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="ImportFolderButton" Style="{StaticResource SecondaryButton}" Click="ImportFolder_Click" Margin="0,0,10,0"
+                        ToolTip="Use se você já descompactou o zip do SIGTAP">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE838;" Style="{StaticResource Icon}" FontSize="14"/>
+                        <TextBlock Text="Pasta descompactada" Margin="8,0,0,0"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ImportButton" Style="{StaticResource PrimaryButton}" Click="ImportZip_Click"
+                        ToolTip="TabelaUnificada_AAAAMM_*.zip baixado do SIGTAP — também dá para arrastar o zip para esta tela">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14"/>
+                        <TextBlock x:Name="ImportButtonText" Text="Importar zip do SIGTAP" Margin="8,0,0,0"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="Consultor SIGTAP" Style="{StaticResource H1}"/>
+                <TextBlock Style="{StaticResource Lead}" Margin="0,6,0,0"
+                           Text="Regras de cada procedimento: instrumento de registro, CBOs aceitos, sexo, faixa etária e valor."/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Aviso de fonte -->
+        <Border x:Name="SourceBanner" Grid.Row="1" CornerRadius="10" BorderThickness="1" Padding="16,12" Margin="0,0,0,18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="SourceIcon" Style="{StaticResource Icon}" VerticalAlignment="Top" Margin="0,2,12,0"/>
+                <StackPanel Grid.Column="1">
+                    <TextBlock x:Name="SourceTitle" FontWeight="SemiBold" FontSize="13"/>
+                    <TextBlock x:Name="SourceText" Style="{StaticResource Body}" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBox x:Name="SearchBox" Grid.Row="2" Style="{StaticResource SearchBox}"
+                 Tag="Buscar por código (com ou sem pontos), nome, CBO ou financiamento"
+                 TextChanged="Filter_Changed"/>
+
+        <DockPanel Grid.Row="3" Margin="0,14,0,6">
+            <TextBlock x:Name="CountText" DockPanel.Dock="Right" Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="0,0,0,8"/>
+            <WrapPanel x:Name="InstrumentChips"/>
+        </DockPanel>
+
+        <Border Grid.Row="4" Style="{StaticResource Card}" Padding="0">
+            <Grid>
+                <DataGrid x:Name="ProcGrid">
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="CÓDIGO" Width="142">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding FormattedCode}" Style="{StaticResource CellMono}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="PROCEDIMENTO" Width="*" MinWidth="240">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center" ToolTip="{Binding Name}">
+                                        <TextBlock Text="{Binding Name}" Style="{StaticResource CellText}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Financing}" Style="{StaticResource CellText}" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Margin="0,1,0,0"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="INSTRUMENTO" Width="122">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <ItemsControl ItemsSource="{Binding AllowedInstruments}" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border CornerRadius="5" Background="{StaticResource AccentSoftBrush}" Padding="6,2" Margin="0,0,4,0">
+                                                    <TextBlock Text="{Binding}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AccentHoverBrush}"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="SEXO" Binding="{Binding SexDisplay}" Width="88" ElementStyle="{StaticResource CellText}"/>
+                        <DataGridTextColumn Header="IDADE" Binding="{Binding AgeRangeDisplay}" Width="128" ElementStyle="{StaticResource CellText}"/>
+                        <DataGridTemplateColumn Header="CBOS ACEITOS" Width="160">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding CboSummary}" Style="{StaticResource CellMono}" FontSize="12" ToolTip="{Binding CboSummary}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="VALOR SA" Binding="{Binding UnitValue, StringFormat=C}" Width="100" ElementStyle="{StaticResource CellMoney}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <StackPanel x:Name="NoResults" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
+                    <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="28" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Nenhum procedimento encontrado" Style="{StaticResource H3}" HorizontalAlignment="Center" Margin="0,10,0,2"/>
+                    <TextBlock x:Name="NoResultsHint" Style="{StaticResource Caption}" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

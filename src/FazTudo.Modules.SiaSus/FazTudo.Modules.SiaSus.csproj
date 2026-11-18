@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\FazTudo.Core\FazTudo.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Base de erros compartilhada com o app web (Python). -->
+    <EmbeddedResource Include="..\..\shared\sia-knowledge.json" LogicalName="FazTudo.SiaKnowledge.json" Link="Catalog\sia-knowledge.json" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

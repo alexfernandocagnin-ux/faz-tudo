@@ -1,0 +1,34 @@
+# Tema do app web (web/app.py). Claro e escuro definidos separadamente: o usuário escolhe no menu ⋮ → Settings,
+# ou o navegador segue o tema do sistema. As cores foram escolhidas para texto legível nos dois.
+
+[server]
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+baseRadius = "0.6rem"
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#0d9488"
+backgroundColor = "#f6f8fb"
+secondaryBackgroundColor = "#eef2f7"
+textColor = "#0f172a"
+linkColor = "#0f766e"
+borderColor = "#d9dfe8"
+
+[theme.dark]
+primaryColor = "#0d9488"
+backgroundColor = "#0b1220"
+secondaryBackgroundColor = "#131c2e"
+textColor = "#e6e9ef"
+linkColor = "#5eead4"
+borderColor = "#27324a"
+
+[theme.light.sidebar]
+backgroundColor = "#ffffff"
+
+[theme.dark.sidebar]
+backgroundColor = "#0f1729"

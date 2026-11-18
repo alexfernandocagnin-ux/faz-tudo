@@ -1,0 +1,359 @@
+{
+  "$comment": "Base de EXEMPLO do SIGTAP (valores e CBOs ilustrativos, não use para faturar). Gerada a partir do desktop; o app web usa até alguém importar a tabela oficial.",
+  "procedures": [
+    {
+      "code": "0201020033",
+      "name": "Coleta de Material para Exame Citopatológico de Colo de Útero",
+      "sexRestriction": "F",
+      "minAgeMonths": 120,
+      "maxAgeMonths": 1320,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225125",
+        "225142",
+        "225250",
+        "223505",
+        "223565"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 6.64,
+      "financing": "FAEC / MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0203010019",
+      "name": "Exame Citopatológico Cérvico-Vaginal/Microflora",
+      "sexRestriction": "F",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "221105",
+        "225305",
+        "225335"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 0.00,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0203010086",
+      "name": "Exame Citopatológico Cérvico-Vaginal/Microflora - Rastreamento",
+      "sexRestriction": "F",
+      "minAgeMonths": 300,
+      "maxAgeMonths": 779,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "221105",
+        "225305",
+        "225335"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 0.00,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0204030188",
+      "name": "Mamografia Bilateral para Rastreamento",
+      "sexRestriction": "F",
+      "minAgeMonths": 600,
+      "maxAgeMonths": 839,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225320"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "121/001 (Diagnóstico por Imagem)",
+      "unitValue": 45.00,
+      "financing": "FAEC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0205020143",
+      "name": "Ultrassonografia Obstétrica",
+      "sexRestriction": "F",
+      "minAgeMonths": 108,
+      "maxAgeMonths": 720,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225320",
+        "225250"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "121/005 (Ultrassonografia)",
+      "unitValue": 24.20,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0206010079",
+      "name": "Tomografia Computadorizada de Crânio",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-I",
+        "APAC"
+      ],
+      "allowedCbos": [
+        "225320"
+      ],
+      "requiresCid": true,
+      "requiredServiceClassification": "121/002 (Tomografia)",
+      "unitValue": 97.44,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0211020036",
+      "name": "Eletrocardiograma (ECG)",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-C",
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225120",
+        "225125",
+        "223505",
+        "322205"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 5.15,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301010048",
+      "name": "Consulta de Profissionais de Nível Superior na Atenção Especializada (Exceto Médico)",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-I",
+        "BPA-C"
+      ],
+      "allowedCbos": [
+        "223505",
+        "223605",
+        "223710",
+        "251510",
+        "223810",
+        "251605"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 6.30,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301010064",
+      "name": "Consulta Médica / Enfermagem na Atenção Primária",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-C",
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225125",
+        "225142",
+        "225130",
+        "225124",
+        "223505",
+        "223565"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 0.00,
+      "financing": "PAB / APS",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301010072",
+      "name": "Consulta Médica em Atenção Especializada",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225125",
+        "225120",
+        "225124",
+        "225135",
+        "225155",
+        "225250",
+        "225265",
+        "225270",
+        "225275"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 10.00,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301010110",
+      "name": "Consulta Pré-Natal",
+      "sexRestriction": "F",
+      "minAgeMonths": 108,
+      "maxAgeMonths": 720,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "225125",
+        "225142",
+        "225250",
+        "223505",
+        "223565",
+        "223545"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 0.00,
+      "financing": "PAB / Rede Alyne",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301080208",
+      "name": "Atendimento Individual de Paciente em CAPS",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "RAAS"
+      ],
+      "allowedCbos": [
+        "225133",
+        "251510",
+        "223505",
+        "223905",
+        "251605"
+      ],
+      "requiresCid": true,
+      "requiredServiceClassification": "115/002 (Atenção Psicossocial - CAPS)",
+      "unitValue": 0.00,
+      "financing": "MAC / RAPS",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0301100039",
+      "name": "Aferição de Pressão Arterial",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-C",
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "223505",
+        "223565",
+        "322205",
+        "322230",
+        "322245",
+        "225125",
+        "225142"
+      ],
+      "requiresCid": false,
+      "requiredServiceClassification": "",
+      "unitValue": 0.00,
+      "financing": "PAB / APS",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0302050027",
+      "name": "Atendimento Fisioterapêutico nas Alterações Motoras",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "BPA-I"
+      ],
+      "allowedCbos": [
+        "223605"
+      ],
+      "requiresCid": true,
+      "requiredServiceClassification": "135/001 (Reabilitação Física)",
+      "unitValue": 4.67,
+      "financing": "MAC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0304020133",
+      "name": "Quimioterapia do Carcinoma de Mama Avançado (1ª Linha)",
+      "sexRestriction": "I",
+      "minAgeMonths": 228,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "APAC"
+      ],
+      "allowedCbos": [
+        "225121"
+      ],
+      "requiresCid": true,
+      "requiredServiceClassification": "132/003 (Oncologia Clínica - UNACON/CACON)",
+      "unitValue": 1700.00,
+      "financing": "MAC / Alta Complexidade",
+      "allowedCids": [],
+      "maxQuantity": 0
+    },
+    {
+      "code": "0305010107",
+      "name": "Hemodiálise Crônica (Máximo 3 Sessões por Semana)",
+      "sexRestriction": "I",
+      "minAgeMonths": 0,
+      "maxAgeMonths": 9999,
+      "allowedInstruments": [
+        "APAC"
+      ],
+      "allowedCbos": [
+        "225109"
+      ],
+      "requiresCid": true,
+      "requiredServiceClassification": "130/001 (Atenção a Doença Renal Crônica - TRS)",
+      "unitValue": 240.97,
+      "financing": "FAEC",
+      "allowedCids": [],
+      "maxQuantity": 0
+    }
+  ]
+}

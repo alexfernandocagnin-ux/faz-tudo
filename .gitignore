@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+plugins/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Configuração local do Claude Code
+.claude/

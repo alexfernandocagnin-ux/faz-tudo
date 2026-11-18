@@ -1,0 +1,3 @@
+remessa-bpa-exemplo.txt: remessa BPA-Mag fictícia (competência 11/2026) para testar o Triador BPA.
+Todos os dados são inventados. Contém linhas com críticas de propósito:
+sexo incompatível, CBO não permitido, idade fora da faixa, CNS inválido, raça/cor 99 e BPA-C de procedimento só BPA-I.

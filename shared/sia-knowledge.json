@@ -1,0 +1,968 @@
+{
+  "$comment": "Base de erros do SIA/SUS compartilhada entre o desktop (C#) e o app web (Python/Streamlit). Edite aqui: os dois leem este arquivo.",
+  "version": 1,
+  "areas": {
+    "BPA": {
+      "label": "BPA — produção da unidade",
+      "who": "A unidade que produziu (quem digita o BPA ou exporta do prontuário).",
+      "action": "Mande a lista para a unidade corrigir na origem (prontuário ou BPA-Mag) e reenviar a remessa."
+    },
+    "APAC": {
+      "label": "APAC — prestador",
+      "who": "O prestador que emitiu a APAC; se envolver laudo ou autorização, também a regulação/autorizador da Secretaria.",
+      "action": "Mande para o prestador corrigir no APAC-Mag (ou no sistema dele) e reapresentar."
+    },
+    "CNES": {
+      "label": "CNES — cadastro",
+      "who": "O setor do CNES da Secretaria (cadastro de estabelecimentos e profissionais).",
+      "action": "Ajustar no SCNES, enviar a base dentro do cronograma da competência e reimportar o CNES no SIA."
+    },
+    "FPO": {
+      "label": "FPO — programação",
+      "who": "O gestor/programação da Secretaria, na FPO Magnético.",
+      "action": "Programar meta física e financeira do procedimento para o estabelecimento, importar a FPO no SIA e recalcular."
+    },
+    "SIA": {
+      "label": "SIA — aqui no faturamento",
+      "who": "Você, no próprio SIA (tabelas, instalação, banco de dados, transmissão).",
+      "action": "Resolver aqui e rodar o processamento de novo."
+    }
+  },
+  "siaCodes": {
+    "FET2": "sia-bpa-005",
+    "ERRI": "sia-bpa-raca",
+    "ERRj": "sia-bpa-cns",
+    "9Q": "sia-bpa-cid",
+    "67": "sia-apac-dup",
+    "Y8": "sia-apac-vig",
+    "ERR8": "sia-cons-err8",
+    "ERRo": "sia-cons-erro",
+    "QTD2": "sia-cons-qtd2",
+    "12": "sia-cons-12"
+  },
+  "entries": [
+    {
+      "id": "sia-bpa-001",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-001",
+      "title": "Procedimento não cadastrado ou inativo na competência",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "SIA",
+      "affectedSystems": "BPA-Mag, APAC-Mag, SIA, e-SUS PEC",
+      "symptom": "Relatório de consistência acusa '001 - Procedimento não cadastrado na competência' ou código inexistente.",
+      "rootCause": "O pacote mensal BDSIA/SIGTAP não foi atualizado para a competência vigente (ou caiu no VirtualStore do Windows), ou o prontuário exportou um código revogado por portaria.",
+      "financialImpactNote": "Rejeição total da linha. Nenhum valor ambulatorial do procedimento entra no cálculo de crédito.",
+      "searchKeywords": [
+        "001",
+        "bdsia",
+        "sigtap",
+        "inativo",
+        "competencia",
+        "procedimento nao cadastrado"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SIGTAP Web / Consultor SIGTAP",
+          "actionTitle": "Conferir se o código de 10 dígitos continua ativo na competência",
+          "detailedInstruction": "Pesquise os 10 dígitos do procedimento na aba 'Consultor SIGTAP' desta plataforma ou no portal sigtap.datasus.gov.br selecionando exatamente o mês/ano do atendimento.",
+          "verificationTip": "Se foi extinto, consulte a portaria de revogação para identificar o código substituto."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "BPA-Mag / SIA Local",
+          "actionTitle": "Executar o BDSIA da competência como Administrador",
+          "detailedInstruction": "Baixe o instalador BDSIA[AAMM].exe oficial do DATASUS, clique com o botão direito -> 'Executar como Administrador' e aponte para a pasta raiz real (ex: C:\\SIA e C:\\BPA).",
+          "verificationTip": "Use a aba 'Doutor TI DATASUS' para checar se o Windows desviou os arquivos para a pasta VirtualStore."
+        },
+        {
+          "stepNumber": 3,
+          "targetSystem": "SIA",
+          "actionTitle": "Importar tabelas e reexecutar a Consistência",
+          "detailedInstruction": "No SIA, acesse Tabelas -> Importar Tabelas (BDSIA), confirme a competência exibida no rodapé e rode novamente Movimentação -> Consistir Produção.",
+          "verificationTip": "O sumário do Relatório de Consistência deve zerar o código 001."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-002",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-002",
+      "title": "Procedimento não permitido para o Sexo do paciente",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-I, APAC, RAAS, CADSUS",
+      "symptom": "Crítica '002 - Procedimento incompatível com o sexo' no processamento do BPA-I ou APAC.",
+      "rootCause": "Procedimento exclusivo feminino (ex: preventivo citopatológico, pré-natal, obstetrícia) lançado em paciente com sexo 'M' (ou exclusivo masculino em 'F') por erro cadastral na recepção ou CADSUS.",
+      "financialImpactNote": "Glosa integral do atendimento individualizado.",
+      "searchKeywords": [
+        "002",
+        "sexo",
+        "feminino",
+        "masculino",
+        "cadsus",
+        "preventivo",
+        "obstetricia"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "CADSUS Web / Prontuário",
+          "actionTitle": "Auditar o cadastro nacional (CNS/CPF) do paciente",
+          "detailedInstruction": "Consulte o CNS/CPF no CADSUS Web e no prontuário local (e-SUS PEC ou ERP hospitalar) para verificar se o sexo foi digitado errado na recepção.",
+          "verificationTip": "Se o erro estiver no CADSUS nacional, atualize primeiro o CADSUS antes de reexportar."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "BPA-Mag / Prontuário",
+          "actionTitle": "Ajustar o registro ou código do procedimento",
+          "detailedInstruction": "Corrija o campo Sexo ('M'/'F') na ficha BPA-I/APAC ou substitua o procedimento caso tenha havido erro de digitação do código de exame.",
+          "verificationTip": "Regere o arquivo de remessa (.PA/.TXT) após salvar."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-004",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-004",
+      "title": "Profissional com CBO incompatível com o Procedimento",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "secondaryArea": "CNES",
+      "affectedSystems": "BPA-C, BPA-I, APAC, e-SUS PEC, SCNES",
+      "symptom": "Crítica '004 - Procedimento não permitido para o CBO' (campeão absoluto de volume de linhas rejeitadas).",
+      "rootCause": "A ocupação (CBO de 6 dígitos) vinculada ao profissional que registrou o atendimento não consta na relação 'rl_procedimento_ocupacao' do SIGTAP para aquele código.",
+      "financialImpactNote": "Um único profissional configurado com CBO errado pode glosar centenas de consultas/procedimentos do mês inteiro.",
+      "searchKeywords": [
+        "004",
+        "cbo",
+        "ocupacao",
+        "enfermeiro",
+        "medico",
+        "tecnico",
+        "incompativel"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Consultor SIGTAP",
+          "actionTitle": "Listar os CBOs aceitos pelo procedimento na competência",
+          "detailedInstruction": "Abra a aba 'Consultor SIGTAP' e verifique quais códigos de 6 dígitos são permitidos (ex: 225125 Clínico, 225142 Médico ESF, 223505 Enfermeiro).",
+          "verificationTip": "Cuidado com CBOs administrativos ou de recepcionista/auxiliar lançando procedimentos privativos de nível superior."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "SCNES / RH da Unidade",
+          "actionTitle": "Conferir o CBO cadastrado para o profissional no CNES",
+          "detailedInstruction": "Verifique no espelho do CNES da competência se o profissional possui o CBO correto vinculado e com Carga Horária Ambulatorial maior que zero.",
+          "verificationTip": "O CBO enviado no arquivo BPA precisa ser IDÊNTICO ao CBO ativo no CNES daquela competência."
+        },
+        {
+          "stepNumber": 3,
+          "targetSystem": "e-SUS PEC / Prontuário / BPA-Mag",
+          "actionTitle": "Corrigir a lotação e reexportar a produção",
+          "detailedInstruction": "Se o profissional tem dois vínculos/CBOs (ex: Clínico e Cardiologista), ajuste a lotação usada no atendimento e regere a remessa BPA.",
+          "verificationTip": "Passe o novo arquivo no 'Triador BPA' para confirmar zero ocorrências de 004."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-005",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-005",
+      "title": "Idade do paciente fora da faixa etária permitida no SIGTAP",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-C, BPA-I, APAC, RAAS",
+      "symptom": "Crítica '005 - Procedimento não permitido para a idade' ou 'Idade inválida'.",
+      "rootCause": "A diferença entre Data de Atendimento e Data de Nascimento está fora dos limites mínimo/máximo (em meses/anos) definidos no SIGTAP — muito comum quando digitam o ano atual na data de nascimento de adultos (idade = 0).",
+      "financialImpactNote": "Glosa total da linha afetada.",
+      "searchKeywords": [
+        "005",
+        "idade",
+        "faixa etaria",
+        "nascimento",
+        "pediatria",
+        "recem nascido"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "BPA-Mag / Prontuário",
+          "actionTitle": "Conferir Data de Nascimento vs Data do Atendimento",
+          "detailedInstruction": "Verifique se a data de nascimento do paciente não foi preenchida com a data do dia do atendimento (gerando idade 0 meses) ou com ano trocado.",
+          "verificationTip": "Em BPA-C (consolidado), confira se o campo Idade foi preenchido quando o procedimento exige faixa específica."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "Consultor SIGTAP",
+          "actionTitle": "Trocar para o código compatível com a faixa etária",
+          "detailedInstruction": "Muitos exames e consultas têm códigos separados para Puericultura/Pediatria vs Adulto/Idoso ou Rastreamento (ex: Mamografia de rastreamento 50-69 anos vs Mamografia diagnóstica qualquer idade).",
+          "verificationTip": "Se for fora da faixa de rastreamento por indicação clínica, use o código diagnóstico correspondente."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-006",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-006 / 007",
+      "title": "Instrumento de Registro incorreto (BPA-C x BPA-I x APAC)",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-Mag, e-SUS PEC, Prontuários Próprios",
+      "symptom": "Crítica '006 - Procedimento exclusivo de BPA-I lançado em BPA-C' ou '007 - Exclusivo de BPA-C / APAC'.",
+      "rootCause": "Portarias do Ministério da Saúde frequentemente migram procedimentos de Consolidado (BPA-C) para Individualizado (BPA-I) para exigir CNS/CPF e CID, mas o sistema de origem continuou exportando agregado.",
+      "financialImpactNote": "Rejeição do lote consolidado daquele procedimento até ser individualizado com dados do paciente.",
+      "searchKeywords": [
+        "006",
+        "007",
+        "instrumento",
+        "bpac",
+        "bpai",
+        "consolidado",
+        "individualizado"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Consultor SIGTAP",
+          "actionTitle": "Verificar os instrumentos admitidos ('01 BPA-C', '02 BPA-I', '06 APAC')",
+          "detailedInstruction": "Consulte o procedimento para confirmar se ele aceita apenas BPA-I (Individualizado) na competência atual.",
+          "verificationTip": "Se aceita ambos (BPA-C e BPA-I), verifique se o gestor municipal determinou obrigatoriedade local de BPA-I."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "Prontuário / BPA-Mag",
+          "actionTitle": "Reclassificar a forma de exportação e completar CNS/CPF",
+          "detailedInstruction": "Atualize a tabela SIGTAP interna do prontuário hospitalar/e-SUS para que ele exporte os registros no layout '03' (BPA-I) com CNS/CPF, data de nascimento, sexo e raça/cor.",
+          "verificationTip": "Nunca lance manualmente em BPA-C o que exige BPA-I: o SIA bloqueará na consistência."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-cns",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-CNS/CPF",
+      "title": "CNS ou CPF do paciente inválido, ausente ou em conflito",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-I, APAC, RAAS",
+      "symptom": "Crítica de 'CNS inválido (dígito verificador)', 'Documento obrigatório não informado' ou conflito CPF x CNS.",
+      "rootCause": "Número de Cartão SUS com 15 dígitos que reprova no cálculo Módulo 11 (digitação manual), CPF com dígito inválido ou preenchimento simultâneo inválido em versões antigas do coletor.",
+      "financialImpactNote": "Rejeição imediata do atendimento individualizado ou da APAC inteira.",
+      "searchKeywords": [
+        "cns",
+        "cartao sus",
+        "cpf",
+        "modulo 11",
+        "digito verificador",
+        "paciente"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Triador BPA / CADSUS Web",
+          "actionTitle": "Identificar os pacientes com documento reprovado no Módulo 11",
+          "detailedInstruction": "Use a aba 'Triador BPA' para listar exatamente quais linhas têm CNS/CPF matematicamente inválidos e busque o paciente por Nome + Nome da Mãe + Data de Nascimento no CADSUS Web.",
+          "verificationTip": "Prefira o CPF válido ou o CNS definitivo iniciado em 7, 8, 9, 1 ou 2."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "BPA-Mag / APAC-Mag",
+          "actionTitle": "Preencher apenas um identificador válido conforme a versão",
+          "detailedInstruction": "No BPA-Mag, informe prioritariamente o CNS válido de 15 dígitos (ou CPF válido nas versões atuais compatíveis), sem espaços ou caracteres especiais.",
+          "verificationTip": "Evite CNS provisórios vencidos ou sequências zeradas."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-raca",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-RAÇA/ETNIA",
+      "title": "Raça/Cor '99 - Sem Informação' bloqueada ou Etnia Indígena ausente",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-I, APAC, RAAS, e-SUS PEC",
+      "symptom": "Rejeição por 'Raça/Cor inválida ou não permitida' ou 'Etnia obrigatória para Raça/Cor 05 (Indígena)'.",
+      "rootCause": "Portaria do Ministério da Saúde restringiu/extinguiu o uso do código '99 (Sem informação)' para forçar a coleta autodeclarada (01 Branca, 02 Preta, 03 Parda, 04 Amarela, 05 Indígena), além de exigir código de Etnia quando Raça = 05.",
+      "financialImpactNote": "Lotes inteiros exportados de ERPs antigos que gravavam '99' por padrão são glosados na consistência.",
+      "searchKeywords": [
+        "raca",
+        "cor",
+        "99",
+        "etnia",
+        "indigena",
+        "sem informacao"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Recepção / Cadastro de Pacientes",
+          "actionTitle": "Tornar Raça/Cor obrigatória (01 a 05) no cadastro do prontuário",
+          "detailedInstruction": "Remova o valor padrão '99' do sistema de recepção e atualize o cadastro dos pacientes rejeitados conforme autodeclaração.",
+          "verificationTip": "Se Raça/Cor for '05 - Indígena', preencha obrigatoriamente os 4 dígitos da Tabela de Etnias Indígenas do SUS."
+        }
+      ]
+    },
+    {
+      "id": "sia-bpa-cid",
+      "moduleId": "sia-sus",
+      "errorCode": "BPA-CID10",
+      "title": "CID-10 Principal ausente ou incompatível com o procedimento",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "APAC, BPA-I, RAAS",
+      "symptom": "Crítica 'CID incompatível com o procedimento' ou 'CID Principal obrigatório não informado'.",
+      "rootCause": "O código CID-10 de 4 caracteres lançado no laudo não consta na tabela 'rl_procedimento_cid' daquele procedimento (ex: usou CID genérico Z00 em exame/terapia que exige CID da neoplasia ou doença crônica).",
+      "financialImpactNote": "Bloqueia 100% da aprovação de APACs (Oncologia, TRS, Glaucoma) e procedimentos BPA-I condicionados.",
+      "searchKeywords": [
+        "cid",
+        "cid10",
+        "cid-10",
+        "diagnostico",
+        "laudo",
+        "incompativel"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Consultor SIGTAP / Médico Solicitante",
+          "actionTitle": "Conferir a lista de CIDs permitidos e solicitar retificação clínica",
+          "detailedInstruction": "Verifique quais subcategorias CID-10 (ex: C50.9 em vez de C50 sem subcategoria, quando exigido) são válidas no SIGTAP. Nunca altere CID clínico por conta própria sem respaldo do prontuário/laudo médico.",
+          "verificationTip": "Digite o CID sem ponto (ex: 'C509' ou 'I10 ' conforme layout do coletor)."
+        }
+      ]
+    },
+    {
+      "id": "sia-cnes-prof",
+      "moduleId": "sia-sus",
+      "errorCode": "CNES-PROF",
+      "title": "Profissional não vinculado ao CNES na competência ou sem CH Ambulatorial",
+      "layer": "2. CNES / Vínculos",
+      "severity": "CriticalGlosa",
+      "area": "CNES",
+      "affectedSystems": "SIA, SCNES Local/Web, BPA-I, APAC, RAAS",
+      "symptom": "Crítica 'Profissional/CNS não cadastrado no estabelecimento na competência' ou 'Profissional sem carga horária ambulatorial'.",
+      "rootCause": "O profissional atendeu na unidade, mas: (a) só foi incluído no SCNES na competência seguinte, (b) está cadastrado apenas com Carga Horária Hospitalar (CH Amb = 0), ou (c) a base CNES importada no SIA está desatualizada.",
+      "financialImpactNote": "Toda a produção nominal daquele médico/enfermeiro/terapeuta na unidade é rejeitada.",
+      "searchKeywords": [
+        "cnes",
+        "profissional",
+        "carga horaria",
+        "ch ambulatorial",
+        "vinculo",
+        "scnes"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SCNES Web / Espelho do CNES",
+          "actionTitle": "Conferir o cadastro do profissional na EXATA competência do atendimento",
+          "detailedInstruction": "Abra o CNES Web -> Consulta Estabelecimento -> Profissionais -> selecione a competência faturada e verifique: CNS, CBO de 6 dígitos e se a coluna 'CH Ambulatorial SUS' possui pelo menos 1 hora semanal.",
+          "verificationTip": "Médico cadastrado apenas com CH Hospitalar aprova AIH (SIHD), mas GLOSA tudo no SIA!"
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "SIA Local",
+          "actionTitle": "Reimportar o arquivo definitivo do SCNES da competência",
+          "detailedInstruction": "Se o CNES já estava certo na base nacional, baixe o arquivo TXT/ZIP definitivo de exportação do SCNES da competência e importe no SIA em Tabelas -> Importar CNES.",
+          "verificationTip": "Jamais processe a competência Mês/Ano usando o arquivo CNES do mês anterior."
+        }
+      ]
+    },
+    {
+      "id": "sia-cnes-serv",
+      "moduleId": "sia-sus",
+      "errorCode": "CNES-SERV",
+      "title": "Unidade sem Serviço / Classificação exigido pelo procedimento no CNES",
+      "layer": "2. CNES / Vínculos",
+      "severity": "CriticalGlosa",
+      "area": "CNES",
+      "affectedSystems": "SIA, SCNES, BPA-I, APAC",
+      "symptom": "Crítica 'Estabelecimento não possui Serviço/Classificação exigido para o procedimento'.",
+      "rootCause": "Muitos exames e terapias exigem no SIGTAP ('rl_procedimento_servico') que o CNES tenha um par específico Serviço/Classificação ativo (ex: 135/001 Reabilitação, 121/001 Diagnóstico por Imagem).",
+      "financialImpactNote": "Glosa total de todos os procedimentos daquele serviço na unidade.",
+      "searchKeywords": [
+        "servico",
+        "classificacao",
+        "cnes",
+        "135",
+        "121",
+        "especializado"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Consultor SIGTAP",
+          "actionTitle": "Anotar o código de Serviço (3 dígitos) e Classificação (3 dígitos) exigido",
+          "detailedInstruction": "Consulte na ficha do procedimento qual Serviço/Classificação é obrigatório (atenção: às vezes o procedimento aceita mais de uma opção).",
+          "verificationTip": "Anote também se o serviço exige Terceirização ou Ambientes/Equipamentos específicos."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "SCNES Local / Gestor Municipal",
+          "actionTitle": "Incluir o Serviço/Classificação na aba 'Serviços Especializados' do CNES",
+          "detailedInstruction": "No SCNES, cadastre o Serviço/Classificação vinculando pelo menos um profissional habilitado, consista e transmita a atualização do CNES dentro do cronograma da competência.",
+          "verificationTip": "Mudanças no CNES só valem para a competência cujo cronograma ainda esteja aberto!"
+        }
+      ]
+    },
+    {
+      "id": "sia-cnes-hab",
+      "moduleId": "sia-sus",
+      "errorCode": "CNES-HAB",
+      "title": "Falta de Habilitação Portariada ativa no CNES (Alta Complexidade / FAEC)",
+      "layer": "2. CNES / Vínculos",
+      "severity": "CriticalGlosa",
+      "area": "CNES",
+      "affectedSystems": "SIA, APAC, BPA-I, SCNES",
+      "symptom": "Crítica 'Estabelecimento sem Habilitação compatível com o procedimento'.",
+      "rootCause": "Diferente de Serviço/Classificação (que o gestor municipal altera), a Habilitação Centralizada depende de Portaria do Ministério da Saúde publicada no DOU (ex: UNACON, TRS/Nefrologia, CER, Glaucoma).",
+      "financialImpactNote": "Impossibilita faturar procedimentos de Alta Complexidade / FAEC habilitados.",
+      "searchKeywords": [
+        "habilitacao",
+        "portaria",
+        "dou",
+        "alta complexidade",
+        "faec",
+        "unacon",
+        "trs"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "CNES Web -> Habilitações",
+          "actionTitle": "Verificar vigência da Portaria de Habilitação da unidade",
+          "detailedInstruction": "Consulte no CNES Web se o código de habilitação exigido pelo SIGTAP consta ativo na competência ou se houve desabilitação/mudança de código.",
+          "verificationTip": "Se a unidade não é habilitada pelo MS para Alta Complexidade, verifique se lançou por engano código de Alta Complexidade em vez do código de Média Complexidade (MAC)."
+        }
+      ]
+    },
+    {
+      "id": "sia-cnes-equip",
+      "moduleId": "sia-sus",
+      "errorCode": "CNES-EQUIP",
+      "title": "Equipamento obrigatório ausente ou marcado como fora de uso no CNES",
+      "layer": "2. CNES / Vínculos",
+      "severity": "CriticalGlosa",
+      "area": "CNES",
+      "affectedSystems": "SIA, SCNES, BPA-I, SISCAN",
+      "symptom": "Crítica 'Estabelecimento não possui equipamento exigido para o procedimento'.",
+      "rootCause": "Exames como Mamografia, Tomografia, Ultrassonografia, Raio-X e Eletrocardiograma exigem o respectivo equipamento cadastrado no CNES com indicador 'Disponível para o SUS = Sim' e 'Quantidade em Uso > 0'.",
+      "financialImpactNote": "Glosa integral de todos os laudos daquele exame na competência.",
+      "searchKeywords": [
+        "equipamento",
+        "mamografo",
+        "tomografo",
+        "ultrassom",
+        "raio-x",
+        "em uso"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SCNES -> Equipamentos",
+          "actionTitle": "Regularizar quantidade 'Em Uso' e vínculo SUS do equipamento",
+          "detailedInstruction": "No SCNES da unidade, verifique o código exato do equipamento exigido no SIGTAP, confirme 'Em Uso >= 1' e 'SUS = Sim' (ou informe corretamente o CNES do terceiro executante caso terceirizado).",
+          "verificationTip": "Reexporte o CNES para o SIA após aprovar a base."
+        }
+      ]
+    },
+    {
+      "id": "sia-cnes-ine",
+      "moduleId": "sia-sus",
+      "errorCode": "CNES-INE",
+      "title": "Código INE de Equipe inválido na exportação e-SUS APS / RAAS",
+      "layer": "2. CNES / Vínculos",
+      "severity": "CriticalGlosa",
+      "area": "CNES",
+      "secondaryArea": "PRODUCAO",
+      "affectedSystems": "e-SUS PEC, RAAS-AD, BPA-I, SCNES",
+      "symptom": "Crítica 'Equipe (INE) não cadastrada ou inativa no CNES para o estabelecimento'.",
+      "rootCause": "O prontuário e-SUS PEC exportou fichas com um número INE (10 dígitos) de equipe que foi desativada no CNES ou pertence a outra UBS.",
+      "financialImpactNote": "Rejeita a produção da equipe inteira no SIA / RAAS.",
+      "searchKeywords": [
+        "ine",
+        "equipe",
+        "esf",
+        "esus",
+        "e-sus",
+        "pec",
+        "raas",
+        "emad"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "e-SUS PEC / XML CNES",
+          "actionTitle": "Sincronizar a lotação XML do CNES dentro do e-SUS PEC",
+          "detailedInstruction": "Importe o arquivo XML atualizado do SCNES no módulo Administração do e-SUS PEC para alinhar CNES + INE + CBO antes de reexportar o arquivo BPA/RAAS.",
+          "verificationTip": "Verifique em RAAS-AD se a equipe EMAD/EMAP está ativa na competência."
+        }
+      ]
+    },
+    {
+      "id": "sia-apac-vig",
+      "moduleId": "sia-sus",
+      "errorCode": "APAC-VIG",
+      "title": "APAC com validade expirada ou competência fora da vigência",
+      "layer": "3. APAC & RAAS",
+      "severity": "CriticalGlosa",
+      "area": "APAC",
+      "affectedSystems": "APAC-Mag, SIA",
+      "symptom": "Crítica 'Competência de apresentação fora da validade da APAC' ou 'APAC encerrada'.",
+      "rootCause": "Tentativa de cobrar procedimento em competência posterior à Data Fim de Validade da APAC (ex: APAC de 3 competências tentando cobrar a 4ª sem abrir nova autorização inicial) ou APAC encerrada por alta/óbito.",
+      "financialImpactNote": "Perda de valores altos (tratamentos oncológicos, renais, oftalmológicos).",
+      "searchKeywords": [
+        "apac",
+        "validade",
+        "vigencia",
+        "continuidade",
+        "vencida",
+        "3 competencias"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "APAC-Mag / Central de Regulação",
+          "actionTitle": "Verificar Tipo da APAC (1-Inicial, 2-Continuidade, 3-Única) e janela de datas",
+          "detailedInstruction": "Confira a Data de Início e Data de Fim autorizadas. Quando vence o ciclo máximo (ex: 3 ou 6 competências), é obrigatório emitir um novo laudo e novo número de APAC Inicial junto ao autorizador.",
+          "verificationTip": "Confira se não houve cobrança de motivo de saída (alta/transferência/óbito) na competência anterior."
+        }
+      ]
+    },
+    {
+      "id": "sia-apac-dup",
+      "moduleId": "sia-sus",
+      "errorCode": "APAC-DUP",
+      "title": "Duplicidade ou sobreposição de APAC ativa para o mesmo paciente",
+      "layer": "3. APAC & RAAS",
+      "severity": "CriticalGlosa",
+      "area": "APAC",
+      "affectedSystems": "APAC-Mag, SIA",
+      "symptom": "Crítica 'Paciente já possui APAC ativa para o mesmo tratamento/grupo na competência'.",
+      "rootCause": "Duas APACs abertas para o mesmo CNS em procedimentos concomitantes vedados (ex: paciente transferiu de clínica de hemodiálise/oncologia e a clínica anterior não registrou Motivo de Saída por transferência).",
+      "financialImpactNote": "A segunda APAC é bloqueada integralmente.",
+      "searchKeywords": [
+        "apac",
+        "duplicidade",
+        "sobreposicao",
+        "mesmo paciente",
+        "motivo de saida",
+        "transferencia"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SIA / Regulação Municipal ou Estadual",
+          "actionTitle": "Encerrar a APAC anterior com Motivo de Saída antes de iniciar a nova",
+          "detailedInstruction": "Acione a Regulação para verificar qual estabelecimento mantém APAC aberta para o CNS do paciente e registre o encerramento/mudança de procedimento na competência adequada.",
+          "verificationTip": "Nunca reutilize numeração de APAC já processada."
+        }
+      ]
+    },
+    {
+      "id": "sia-apac-aut",
+      "moduleId": "sia-sus",
+      "errorCode": "APAC-AUT",
+      "title": "Médico Autorizador inválido ou igual ao Médico Executante",
+      "layer": "3. APAC & RAAS",
+      "severity": "CriticalGlosa",
+      "area": "APAC",
+      "secondaryArea": "SIA",
+      "affectedSystems": "APAC-Mag, SIA",
+      "symptom": "Crítica 'Autorizador não cadastrado no SIA' ou 'CNS do Autorizador igual ao Executante/Diretor'.",
+      "rootCause": "Por regra federal de controle e auditoria do SUS, o profissional que assina a autorização da APAC na Secretaria de Saúde NÃO pode ser o mesmo que executa o procedimento nem pertencer ao corpo diretivo do prestador, e precisa estar cadastrado no menu de Autorizadores do SIA.",
+      "financialImpactNote": "Todas as APACs assinadas por esse autorizador caem na consistência.",
+      "searchKeywords": [
+        "autorizador",
+        "regulador",
+        "apac",
+        "executante",
+        "orgao emissor"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SIA -> Tabelas -> Autorizadores",
+          "actionTitle": "Conferir cadastro do Autorizador e Órgão Emissor no SIA do Gestor",
+          "detailedInstruction": "No SIA da Secretaria de Saúde, cadastre o CNS/CPF válido do profissional regulador designado em portaria e garanta que ele não atue como executante nas APACs que autorizou.",
+          "verificationTip": "Valide também o dígito Módulo 11 da faixa numérica de 13 dígitos da APAC."
+        }
+      ]
+    },
+    {
+      "id": "sia-fpo-07p",
+      "moduleId": "sia-sus",
+      "errorCode": "FPO-07 (P)",
+      "title": "Status 07 (P) — Procedimento SEM ORÇAMENTO na FPO",
+      "layer": "4. FPO / Financeiro",
+      "severity": "CriticalGlosa",
+      "area": "FPO",
+      "affectedSystems": "SIA, FPO Magnético",
+      "symptom": "A produção passa sem erros na Consistência, mas no Relatório de Síntese da Produção / Crédito aparece com situação '07' ou '(P) - Sem Orçamento' e valor aprovado R$ 0,00.",
+      "rootCause": "A unidade realizou o procedimento (tudo certo no SIGTAP e no CNES!), porém o gestor de saúde NÃO programou meta física/financeira para esse código/subgrupo na FPO (Ficha de Programação Orçamentária) daquele CNES.",
+      "financialImpactNote": "Glosa financeira silenciosa de 100%: aparece produzido, mas gera R$ 0,00 de faturamento MAC!",
+      "searchKeywords": [
+        "07",
+        "status p",
+        "sem orcamento",
+        "fpo",
+        "ficha de programacao",
+        "zerado",
+        "credito"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "FPO Magnético (Gestor SMS/SES)",
+          "actionTitle": "Incluir o procedimento/subgrupo na FPO do estabelecimento",
+          "detailedInstruction": "Abra o sistema FPO Magnético na competência atual, selecione o CNES da unidade e adicione a meta física e orçamentária do procedimento (respeitando o teto financeiro disponível do município).",
+          "verificationTip": "Verifique se a pactuação na FPO está por código de procedimento (10 dígitos) ou por Subgrupo/Forma de Organização."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "SIA Local",
+          "actionTitle": "Importar nova FPO e recalcular o processamento financeiro",
+          "detailedInstruction": "Exporte o arquivo da FPO Magnética, importe no SIA (Movimentação -> Importar FPO) e rode novamente 'Calcular Produção' antes de gerar a remessa final para o Transmissor.",
+          "verificationTip": "Confira o relatório 'Síntese de Produção e Crédito': o status deve mudar de 07 (P) para 01/02 (Aprovado Total)."
+        }
+      ]
+    },
+    {
+      "id": "sia-fpo-0304",
+      "moduleId": "sia-sus",
+      "errorCode": "FPO-03/04/05/06",
+      "title": "Status 03 (L), 04 (M), 05 (N) ou 06 (O) — Estouro de Teto Físico ou Financeiro",
+      "layer": "4. FPO / Financeiro",
+      "severity": "PartialGlosa",
+      "area": "FPO",
+      "affectedSystems": "SIA, FPO Magnético",
+      "symptom": "Aprovado Parcialmente (03-L / 04-M) ou Não Aprovado por falta de teto (05-N / 06-O) no fechamento financeiro.",
+      "rootCause": "A quantidade executada pela unidade superou a quantidade física ou o valor financeiro programado na FPO daquele prestador.",
+      "financialImpactNote": "O excedente produzido não é pago na competência caso não haja remanejamento de sobras de outras unidades ou teto extra.",
+      "searchKeywords": [
+        "03",
+        "04",
+        "05",
+        "06",
+        "teto",
+        "estouro",
+        "aprovado parcialmente",
+        "fpo"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "FPO Magnético / Regulação e Controle",
+          "actionTitle": "Avaliar remanejamento de saldo ocioso na FPO antes do fechamento",
+          "detailedInstruction": "Compare na Secretaria de Saúde se outras unidades produziram abaixo da FPO na competência e remaneje temporariamente/contratualmente o saldo físico-financeiro dentro do teto MAC municipal.",
+          "verificationTip": "Procedimentos financiados por FAEC (Fundo de Ações Estratégicas e Compensação) têm regra própria fora do teto MAC ordinário."
+        }
+      ]
+    },
+    {
+      "id": "sia-ti-virtualstore",
+      "moduleId": "sia-sus",
+      "errorCode": "TI-VIRTUALSTORE",
+      "title": "BDSIA instala 'com sucesso', mas o SIA/BPA continua na competência antiga",
+      "layer": "5. TI / Firebird / Transmissor",
+      "severity": "SystemBlocker",
+      "area": "SIA",
+      "affectedSystems": "Windows 10/11, SIA, BPA-Mag, APAC-Mag",
+      "symptom": "Você roda o BDSIA do mês novo, não dá erro na tela, mas ao abrir o SIA ou BPA as tabelas continuam desatualizadas ou gerando Erro 001 falso.",
+      "rootCause": "Armadilha clássica de UAC no Windows 10/11: sem privilégio de Administrador, o Windows desvia silenciosamente os arquivos gravados para '%LOCALAPPDATA%\\VirtualStore', criando duas bases paralelas!",
+      "financialImpactNote": "Gera centenas de falsas rejeições ou bloqueia a remessa no Transmissor com [ERRO-7].",
+      "searchKeywords": [
+        "virtualstore",
+        "bdsia",
+        "nao atualiza",
+        "windows 11",
+        "windows 10",
+        "permissao",
+        "administrador"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Doutor TI DATASUS / Explorador Windows",
+          "actionTitle": "Inspecionar se existe pasta VirtualStore sequestrando arquivos do SIA/BPA",
+          "detailedInstruction": "Clique na aba 'Doutor TI DATASUS' desta aplicação para escanear automaticamente sua pasta %LOCALAPPDATA%\\VirtualStore. Se houver pastas 'SIA' ou 'BPA' lá dentro, faça backup dos seus dados antes de limpar.",
+          "verificationTip": "Instale sempre os sistemas DATASUS direto na raiz C:\\SIA, C:\\BPA, C:\\APAC (nunca dentro de 'Arquivos de Programas')."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "Propriedades do Atalho Windows",
+          "actionTitle": "Fixar 'Executar como Administrador' e dar Permissão Total na pasta C:\\SIA",
+          "detailedInstruction": "Clique com o botão direito na pasta C:\\SIA -> Propriedades -> Segurança -> conceda Controle Total ao usuário local, marque 'Executar este programa como administrador' no executável e rode o BDSIA novamente.",
+          "verificationTip": "Confirme na barra inferior do sistema se a versão da tabela mudou para o AAMM vigente."
+        }
+      ]
+    },
+    {
+      "id": "sia-ti-firebird",
+      "moduleId": "sia-sus",
+      "errorCode": "TI-FB3050",
+      "title": "Erro de Banco Firebird (ISC 335544344 / Unavailable Database / Porta 3050)",
+      "layer": "5. TI / Firebird / Transmissor",
+      "severity": "SystemBlocker",
+      "area": "SIA",
+      "affectedSystems": "SIA, SCNES Local, APAC-Mag, Firebird 1.5 / 2.5",
+      "symptom": "Sistema não abre e exibe 'Unavailable database', 'ISC Error Code 335544344 - I/O error for file BDSIA.GDB/FDB' ou 'Unable to complete network request to host localhost'.",
+      "rootCause": "Serviço do Firebird parado no Windows, conflito de duas versões diferentes do Firebird disputando a porta TCP 3050 (ex: Firebird 1.5/2.1 dos sistemas DATASUS vs Firebird 3.0/4.0 de outro ERP), ou antivírus bloqueando o arquivo .GDB/.FDB.",
+      "financialImpactNote": "Paralisa completamente o faturamento local até restabelecer o motor do banco.",
+      "searchKeywords": [
+        "firebird",
+        "3050",
+        "335544344",
+        "unavailable database",
+        "gdb",
+        "fdb",
+        "isc error",
+        "servico"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Serviços do Windows (services.msc)",
+          "actionTitle": "Verificar se o serviço Firebird Server está Em Execução na porta 3050",
+          "detailedInstruction": "Use a aba 'Doutor TI DATASUS' para checar o status da porta 3050 e dos processos 'fbserver.exe'/'fb_inet_server.exe'. Em 'services.msc', inicie o 'Firebird Server - DefaultInstance'.",
+          "verificationTip": "Se outro software instalou Firebird 3.0+, configure instâncias em portas separadas para não quebrar o legado DATASUS."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "Windows Defender / Antivírus",
+          "actionTitle": "Criar exclusão para C:\\SIA e destravar arquivos .GDB / .FDB",
+          "detailedInstruction": "Adicione C:\\SIA, C:\\BPA e C:\\SCNES nas exclusões do antivírus (extensões .GDB são frequentemente confundidas ou bloqueadas durante leituras intensas de consistência).",
+          "verificationTip": "Se o banco corrompeu após queda de energia, rode 'gfix -v -full' em uma cópia de segurança do arquivo."
+        }
+      ]
+    },
+    {
+      "id": "sia-ti-bde",
+      "moduleId": "sia-sus",
+      "errorCode": "TI-BDE/MIDAS",
+      "title": "Erro 'midas.dll' não registrada ou BDE 'Insufficient disk space' no Windows moderno",
+      "layer": "5. TI / Firebird / Transmissor",
+      "severity": "SystemBlocker",
+      "area": "SIA",
+      "affectedSystems": "BPA-Mag, APAC-Mag, FPO, BDE (Borland Database Engine)",
+      "symptom": "Mensagem 'Error loading midas.dll' ao abrir telas, erro de inicialização do BDE ('IDAPI32.CFG') ou falso alerta 'Insufficient disk space' mesmo com centenas de GB livres no SSD.",
+      "rootCause": "Aplicativos 32-bits em Delphi exigem o registro da midas.dll na pasta SysWOW64 (e não apenas System32). Já o erro 'Insufficient disk space' ocorre porque o BDE antigo sofre overflow de inteiro 32-bits quando o espaço livre do disco é múltiplo próximo de 4 GB!",
+      "financialImpactNote": "Impede abrir o coletor ou exportar o arquivo magnético de fechamento.",
+      "searchKeywords": [
+        "midas.dll",
+        "bde",
+        "insufficient disk space",
+        "idapi32",
+        "syswow64",
+        "regsvr32"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Prompt de Comando (Admin)",
+          "actionTitle": "Registrar midas.dll na arquitetura 32-bits (SysWOW64)",
+          "detailedInstruction": "Copie 'midas.dll' da pasta do sistema DATASUS para 'C:\\Windows\\SysWOW64', abra o CMD como Administrador e execute: C:\\Windows\\SysWOW64\\regsvr32.exe C:\\Windows\\SysWOW64\\midas.dll",
+          "verificationTip": "Deve aparecer a confirmação 'DllRegisterServer em midas.dll teve êxito'."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "BDE Administrator / Disco C:",
+          "actionTitle": "Resolver 'Insufficient disk space' e SHAREDMEMLOCATION do BDE",
+          "detailedInstruction": "No BDE Administrator (aba Configuration -> System -> INIT), defina SHAREDMEMLOCATION = 0x5BDE e MAXBUFSIZE = 2048. Se der 'Insufficient disk space', crie/copie um arquivo temporário de ~500 MB no disco apenas para tirar o espaço livre da faixa exata de múltiplo de 4 GB!",
+          "verificationTip": "Salve o IDAPI32.CFG executando o BDEAdmin como Administrador."
+        }
+      ]
+    },
+    {
+      "id": "sia-trans-erros",
+      "moduleId": "sia-sus",
+      "errorCode": "TRANS-ERROS",
+      "title": "Bloqueios no Módulo Transmissor DATASUS ([ERRO-4], [ERRO-6], [ERRO-7], [ERRO-8])",
+      "layer": "5. TI / Firebird / Transmissor",
+      "severity": "SystemBlocker",
+      "area": "SIA",
+      "affectedSystems": "Módulo Transmissor Simultâneo, CNESWeb, SIA",
+      "symptom": "Ao enviar a remessa fechada do SIA para Brasília, o Transmissor recusa o pacote com código [ERRO-4], [ERRO-6], [ERRO-7] ou [ERRO-8].",
+      "rootCause": "[ERRO-4] CPF sem perfil transmissor no CNESWeb; [ERRO-6] Prazo nacional da CGSI encerrado para a competência; [ERRO-7] Remessa gerada com versão antiga do SIA ou BDSIA; [ERRO-8] Remessa idêntica já enviada anteriormente.",
+      "financialImpactNote": "Risco altíssimo: se não transmitir dentro da janela nacional da CGSI, o município inteiro fica sem envio da competência!",
+      "searchKeywords": [
+        "transmissor",
+        "erro-4",
+        "erro-6",
+        "erro-7",
+        "erro-8",
+        "cgsi",
+        "prazo",
+        "remessa"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Diagnóstico por Código do Transmissor",
+          "actionTitle": "Aplicar a correção exata para o código retornado",
+          "detailedInstruction": "• [ERRO-4]: Habilite o CPF do operador no portal CNESWeb (Gestor -> Usuários).\n• [ERRO-6]: Consulte o cronograma oficial da CGSI/DRAC; fora do prazo só é possível enviar mediante reabertura oficial.\n• [ERRO-7]: Atualize a versão do executável do SIA + BDSIA da competência, recalcule e gere nova remessa.\n• [ERRO-8]: Verifique no site do SIA/DATASUS se o arquivo já consta recepcionado; para substituir, solicite cancelamento prévio conforme fluxo da SES/CGSI.",
+          "verificationTip": "Guarde sempre o protocolo/recibo PDF gerado pelo Módulo Transmissor após envio com sucesso."
+        }
+      ]
+    },
+    {
+      "id": "sia-cons-err8",
+      "moduleId": "sia-sus",
+      "errorCode": "ERR8",
+      "title": "Município de residência do paciente inválido",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "BPA-I, BPA-Mag, e-SUS PEC, Prontuários",
+      "symptom": "Relatório de consistência (R0350) com 'MUNICIPIO INVALIDO' (código ERR8) em fichas de BPA-I.",
+      "rootCause": "O código do município de residência do paciente (IBGE de 6 dígitos) veio vazio, com 7 dígitos, de município extinto ou que não existe na tabela do SIA. Acontece muito quando o cadastro do paciente está incompleto ou o prontuário exporta o CEP/nome da cidade no lugar do código.",
+      "financialImpactNote": "A ficha inteira fica sem aprovação enquanto o município não for corrigido.",
+      "searchKeywords": [
+        "err8",
+        "municipio",
+        "ibge",
+        "residencia",
+        "endereco",
+        "cidade"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "BPA-Mag",
+          "actionTitle": "Abrir as fichas apontadas (folha/sequência) e conferir o município",
+          "detailedInstruction": "Localize no BPA-Mag a folha e a sequência listadas no relatório e veja o campo Município de residência do paciente.",
+          "verificationTip": "O código certo tem 6 dígitos, sem o dígito verificador do IBGE (ex.: Araraquara-SP = 350320)."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "e-SUS PEC / Prontuário / Recepção",
+          "actionTitle": "Corrigir o endereço no cadastro de origem",
+          "detailedInstruction": "Se a produção veio do e-SUS ou de outro prontuário, corrija o endereço completo do cidadão lá e exporte de novo. Corrigir só no BPA-Mag faz o erro voltar na próxima remessa.",
+          "verificationTip": "Reimporte no SIA e rode a consistência: o ERR8 deve sumir."
+        }
+      ]
+    },
+    {
+      "id": "sia-cons-erro",
+      "moduleId": "sia-sus",
+      "errorCode": "ERRo",
+      "title": "Procedimento principal exige procedimento secundário obrigatório",
+      "layer": "3. APAC & RAAS",
+      "severity": "CriticalGlosa",
+      "area": "APAC",
+      "affectedSystems": "APAC-Mag, SIA, SIGTAP",
+      "symptom": "'PROC.PRINC. EXIGE, PROC. SECUNDARIO OBRIGATORIO' (código ERRo) em APACs.",
+      "rootCause": "No SIGTAP, alguns procedimentos principais só são aceitos se a APAC trouxer junto procedimentos secundários obrigatórios. É o caso típico das OCIs (Ofertas de Cuidados Integrados, grupo 09, do Programa Mais Acesso a Especialistas): a APAC da OCI precisa listar as consultas e exames que compõem o cuidado. APAC digitada só com o principal é rejeitada.",
+      "financialImpactNote": "A APAC inteira não é aprovada.",
+      "searchKeywords": [
+        "erro",
+        "secundario",
+        "obrigatorio",
+        "oci",
+        "pmae",
+        "compatibilidade",
+        "apac"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "SIGTAP Web",
+          "actionTitle": "Ver quais secundários o procedimento principal exige",
+          "detailedInstruction": "No SIGTAP Web, abra o procedimento principal na competência da APAC e consulte as compatibilidades (procedimentos secundários). Anote os obrigatórios.",
+          "verificationTip": "Nas OCIs, os secundários são as consultas e exames do pacote."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "APAC-Mag / Sistema do prestador",
+          "actionTitle": "Lançar na APAC os secundários realizados e reapresentar",
+          "detailedInstruction": "Inclua na APAC os procedimentos secundários que foram de fato realizados (com quantidade), exporte e reimporte no SIA.",
+          "verificationTip": "Se algum secundário obrigatório não foi feito, o cuidado não está completo: alinhe com a regulação antes de apresentar."
+        }
+      ]
+    },
+    {
+      "id": "sia-cons-qtd2",
+      "moduleId": "sia-sus",
+      "errorCode": "QTD2",
+      "title": "Quantidade acima do máximo permitido para o procedimento",
+      "layer": "1. SIGTAP / Clínico",
+      "severity": "CriticalGlosa",
+      "area": "PRODUCAO",
+      "affectedSystems": "APAC-Mag, BPA-Mag, SIA, SIGTAP",
+      "symptom": "'EXCEDE QUANTIDADE MAXIMA DO PROCEDIMENTO' (código QTD2).",
+      "rootCause": "O SIGTAP define uma quantidade máxima de execução para cada procedimento. A produção informou mais do que isso: erro de digitação na quantidade, lançamento duplicado ou sessões que pertencem a outra competência.",
+      "financialImpactNote": "O registro não é aprovado. Produção acima do limite da tabela não é paga, mesmo que realizada.",
+      "searchKeywords": [
+        "qtd2",
+        "quantidade",
+        "maxima",
+        "excede",
+        "limite",
+        "sessoes"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Consultor SIGTAP",
+          "actionTitle": "Conferir a quantidade máxima do procedimento",
+          "detailedInstruction": "Veja no SIGTAP (ou no Consultor SIGTAP desta ferramenta, com a tabela oficial importada) a quantidade máxima do procedimento na competência.",
+          "verificationTip": "Confira também se o mesmo procedimento não foi lançado duas vezes para o mesmo paciente."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "APAC-Mag / BPA-Mag",
+          "actionTitle": "Ajustar a quantidade ao que foi realizado dentro do limite",
+          "detailedInstruction": "Corrija a quantidade na APAC/BPA, remova lançamentos duplicados e, se forem sessões de outro mês, apresente na competência correta.",
+          "verificationTip": "Reimporte e rode a consistência de novo."
+        }
+      ]
+    },
+    {
+      "id": "sia-cons-12",
+      "moduleId": "sia-sus",
+      "errorCode": "12",
+      "title": "APAC de continuidade sem permanência na competência anterior",
+      "layer": "3. APAC & RAAS",
+      "severity": "CriticalGlosa",
+      "area": "APAC",
+      "affectedSystems": "APAC-Mag, SIA",
+      "symptom": "'APAC COMPETENCIA ANTERIOR NAO FOI PERMANENCIA E MESMO PROCEDIMENTO' (código 12).",
+      "rootCause": "Uma APAC de continuidade só fecha se, na competência anterior, a mesma APAC foi apresentada com o mesmo procedimento e com motivo de saída de permanência (paciente seguindo em tratamento). Se na competência anterior foi informado encerramento (alta, óbito, transferência, mudança de procedimento) ou o procedimento mudou, a continuidade é rejeitada.",
+      "financialImpactNote": "A APAC da competência atual não é aprovada.",
+      "searchKeywords": [
+        "12",
+        "continuidade",
+        "permanencia",
+        "motivo de saida",
+        "apac",
+        "competencia anterior"
+      ],
+      "guidedSteps": [
+        {
+          "stepNumber": 1,
+          "targetSystem": "Relatório R0350 / APAC-Mag",
+          "actionTitle": "Comparar as APACs do paciente listadas no relatório",
+          "detailedInstruction": "Abaixo da ocorrência, o SIA lista as APACs do mesmo CNS/CPF com início (INIC), fim (FIM), data de saída (OCOR) e motivo (MOT). Veja qual APAC encerrou e qual continua.",
+          "verificationTip": "Confira os códigos de motivo de saída na tabela do SIA da competência."
+        },
+        {
+          "stepNumber": 2,
+          "targetSystem": "APAC-Mag / Regulação",
+          "actionTitle": "Acertar o encadeamento das APACs",
+          "detailedInstruction": "Se o tratamento continuou igual, a competência anterior precisa ter motivo de permanência. Se houve troca de procedimento ou esquema, a APAC anterior deve ser encerrada (mudança de procedimento) e a nova precisa entrar como APAC inicial, não como continuidade da antiga.",
+          "verificationTip": "Corrija na origem e reapresente; não reutilize número de APAC já processada."
+        }
+      ]
+    }
+  ]
+}
