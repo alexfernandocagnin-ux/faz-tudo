@@ -111,3 +111,13 @@ def test_padrao_do_projeto_publicado():
 def test_nomes_em_portugues():
     assert title_pt("CONSULTA MEDICA EM ATENCAO ESPECIALIZADA") == "Consulta Medica em Atencao Especializada"
     assert title_pt("EXAME DE SANGUE E URINA") == "Exame de Sangue e Urina"
+
+
+def test_apagar_tabela(store):
+    store.add_zip(make_zip("202610"))
+    store.add_zip(make_zip("202611"))
+    store.use("202611")
+    store.delete("202610")
+    assert set(store.tables()) == {"202611"}
+    with pytest.raises(ValueError, match="em uso"):
+        store.delete("202611")

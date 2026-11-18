@@ -112,6 +112,16 @@ class SigtapStore:
         with self._lock:
             (folder / "em-uso.json").write_text(json.dumps({"competencia": competencia}), encoding="utf-8")
 
+    def delete(self, competencia: str) -> None:
+        """Apaga uma tabela baixada. Não apaga a que está em uso nem a padrão do projeto."""
+        if competencia == self.in_use():
+            raise ValueError("Não dá para apagar a tabela que está em uso.")
+        path = self.data_dir / f"sigtap-{competencia}.json.gz"
+        with self._lock:
+            path.unlink(missing_ok=True)
+            path.with_name(path.name.replace(".json.gz", ".versao")).unlink(missing_ok=True)
+            self._loaded.pop(competencia, None)
+
     def current(self) -> SigtapRepository:
         """A tabela em uso, já carregada; sem nenhuma oficial guardada, a base de exemplo."""
         comp = self.in_use()

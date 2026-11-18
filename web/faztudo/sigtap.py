@@ -29,6 +29,13 @@ DEFAULT_LAYOUTS: dict[str, list[tuple[str, int]]] = {
     "rl_procedimento_ocupacao": [("CO_PROCEDIMENTO", 10), ("CO_OCUPACAO", 6), ("DT_COMPETENCIA", 6)],
     "rl_procedimento_registro": [("CO_PROCEDIMENTO", 10), ("CO_REGISTRO", 2), ("DT_COMPETENCIA", 6)],
     "rl_procedimento_cid": [("CO_PROCEDIMENTO", 10), ("CO_CID", 4), ("ST_PRINCIPAL", 1), ("DT_COMPETENCIA", 6)],
+    "rl_procedimento_compativel": [("CO_PROCEDIMENTO_PRINCIPAL", 10), ("CO_REGISTRO_PRINCIPAL", 2),
+                                   ("CO_PROCEDIMENTO_COMPATIVEL", 10), ("CO_REGISTRO_COMPATIVEL", 2),
+                                   ("TP_COMPATIBILIDADE", 1), ("QT_PERMITIDA", 4), ("DT_COMPETENCIA", 6)],
+    "rl_procedimento_regra_cond": [("CO_PROCEDIMENTO", 10), ("CO_REGRA_CONDICIONADA", 4)],
+    "tb_regra_condicionada": [("CO_REGRA_CONDICIONADA", 4), ("NO_REGRA_CONDICIONADA", 150), ("DS_REGRA_CONDICIONADA", 4000)],
+    "rl_procedimento_detalhe": [("CO_PROCEDIMENTO", 10), ("CO_DETALHE", 3), ("DT_COMPETENCIA", 6)],
+    "tb_detalhe": [("CO_DETALHE", 3), ("NO_DETALHE", 100), ("DT_COMPETENCIA", 6)],
 }
 
 REGISTRO = {"01": "BPA-C", "02": "BPA-I", "03": "AIH", "04": "AIH", "05": "AIH", "06": "APAC", "07": "APAC",
@@ -63,6 +70,10 @@ class SigtapRule:
     required_service_classification: str = ""
     allowed_cids: list[str] = field(default_factory=list)
     max_quantity: int = 0
+    # Procedimentos secundários previstos (rl_procedimento_compativel): [código, quantidade permitida, tipo]
+    compatibles: list[list] = field(default_factory=list)
+    conditioned_rules: list[str] = field(default_factory=list)   # códigos de tb_regra_condicionada
+    details: list[str] = field(default_factory=list)             # códigos de tb_detalhe
 
     @property
     def formatted_code(self) -> str:
@@ -160,6 +171,8 @@ class SigtapRepository:
         self.is_official = official
         self.competencia = competencia  # AAAAMM
         self.version = version
+        self.rule_names: dict[str, tuple[str, str]] = {}  # regra condicionada → (nome, descrição)
+        self.detail_names: dict[str, str] = {}            # detalhe → nome
 
     @property
     def competencia_display(self) -> str:
@@ -207,7 +220,8 @@ class SigtapRepository:
         files: dict[str, bytes] = {}
         for info in archive.infolist():
             name = Path(info.filename).name.lower()
-            if name.endswith(".txt") and (name.startswith("tb_procedimento") or name.startswith("rl_procedimento_")):
+            if name.endswith(".txt") and (name.startswith(("tb_procedimento", "rl_procedimento_", "tb_regra_condicionada",
+                                                           "tb_detalhe"))):
                 files[name] = archive.read(info)
         return SigtapRepository.from_files(files)
 
@@ -233,6 +247,35 @@ class SigtapRepository:
         regs = relation("rl_procedimento_registro", "CO_REGISTRO", lambda r: REGISTRO.get(r, f"REG-{r}"))
         cids = relation("rl_procedimento_cid", "CO_CID", normalize_cid,
                         lambda layout, line: layout.read(line, "ST_PRINCIPAL") in ("", "S"))
+
+        rule_codes = relation("rl_procedimento_regra_cond", "CO_REGRA_CONDICIONADA")
+        detail_codes = relation("rl_procedimento_detalhe", "CO_DETALHE")
+
+        compatibles: dict[str, list[list]] = {}
+        if files.get("rl_procedimento_compativel.txt"):
+            comp_layout = _Layout.load(files, "rl_procedimento_compativel")
+            for line in files["rl_procedimento_compativel.txt"].decode("latin-1").splitlines():
+                principal = comp_layout.read(line, "CO_PROCEDIMENTO_PRINCIPAL")
+                secondary = comp_layout.read(line, "CO_PROCEDIMENTO_COMPATIVEL")
+                if len(principal) != 10 or len(secondary) != 10:
+                    continue
+                qty = comp_layout.read(line, "QT_PERMITIDA")
+                entry = [secondary, int(qty) if qty.isdigit() else 0, comp_layout.read(line, "TP_COMPATIBILIDADE")]
+                if entry not in compatibles.setdefault(principal, []):
+                    compatibles[principal].append(entry)
+
+        def names(table: str, code_col: str, name_col: str, desc_col: str | None = None) -> dict:
+            out = {}
+            raw = files.get(f"{table}.txt")
+            if not raw:
+                return out
+            lay = _Layout.load(files, table)
+            for line in raw.decode("latin-1").splitlines():
+                code = lay.read(line, code_col)
+                if code:
+                    name = lay.read(line, name_col)
+                    out[code] = (name, lay.read(line, desc_col)) if desc_col else name
+            return out
 
         layout = _Layout.load(files, "tb_procedimento")
         procedures: dict[str, SigtapRule] = {}
@@ -267,17 +310,32 @@ class SigtapRepository:
                 financing=FINANCIAMENTO.get(layout.read(line, "CO_FINANCIAMENTO"),
                                             f"FIN-{layout.read(line, 'CO_FINANCIAMENTO')}"),
                 max_quantity=num("QT_MAXIMA_EXECUCAO"),
+                compatibles=compatibles.get(code, []),
+                conditioned_rules=sorted(rule_codes.get(code, set())),
+                details=sorted(detail_codes.get(code, set())),
             )
 
         if not procedures:
             raise ValueError("Nenhum procedimento válido em 'tb_procedimento.txt'.")
-        return SigtapRepository(procedures, _official_label(competencia, len(procedures)), official=True,
+        repo = SigtapRepository(procedures, _official_label(competencia, len(procedures)), official=True,
                                 competencia=competencia)
+        repo.rule_names = {k: (title_pt(v[0]).replace("Secudários", "Secundários"), v[1])
+                           for k, v in names("tb_regra_condicionada", "CO_REGRA_CONDICIONADA", "NO_REGRA_CONDICIONADA",
+                                             "DS_REGRA_CONDICIONADA").items()}
+        repo.detail_names = names("tb_detalhe", "CO_DETALHE", "NO_DETALHE")
+        return repo
+
+    def detail_text(self, rule: SigtapRule) -> list[str]:
+        return [self.detail_names[d] for d in rule.details if d in self.detail_names]
+
+    def rule_texts(self, rule: SigtapRule) -> list[tuple[str, str]]:
+        return [self.rule_names[r] for r in rule.conditioned_rules if r in self.rule_names]
 
     # ------------------------------------------------------------ pacote pronto (json.gz, carrega em segundos)
     def to_bundle(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"label": self.label, "competencia": self.competencia, "version": self.version,
+                   "rule_names": self.rule_names, "detail_names": self.detail_names,
                    "procedures": [p.to_json() for p in self.procedures.values()]}
         temp = path.with_suffix(path.suffix + ".tmp")
         with gzip.open(temp, "wt", encoding="utf-8") as fh:
@@ -289,8 +347,11 @@ class SigtapRepository:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             payload = json.load(fh)
         procs = {p["code"]: SigtapRule.from_json(p) for p in payload["procedures"]}
-        return SigtapRepository(procs, payload["label"], official=True, competencia=payload.get("competencia", ""),
+        repo = SigtapRepository(procs, payload["label"], official=True, competencia=payload.get("competencia", ""),
                                 version=payload.get("version", ""))
+        repo.rule_names = {k: tuple(v) for k, v in payload.get("rule_names", {}).items()}
+        repo.detail_names = payload.get("detail_names", {})
+        return repo
 
 
 def _official_label(competencia: str, count: int) -> str:
@@ -303,10 +364,20 @@ _LOWER_WORDS = {"de", "da", "do", "das", "dos", "e", "em", "na", "no", "nas", "n
                 "para", "p/", "ou", "ao", "aos", "à", "às", "x"}
 
 
+_UPPER_WORDS = {"oci", "apac", "sus", "cid", "hiv", "aids", "cdk", "ii", "iii", "iv", "vi", "vii", "viii", "ix",
+                "uti", "utin", "caps", "rx", "pet-ct", "dna", "rna", "pcr", "ivas", "dst", "ist", "tb"}
+
+
 def title_pt(text: str) -> str:
-    """'CONSULTA MEDICA EM ATENCAO ESPECIALIZADA' → 'Consulta Medica em Atencao Especializada'."""
-    words = text.lower().split()
-    return " ".join(w if (i > 0 and w in _LOWER_WORDS) else w[:1].upper() + w[1:] for i, w in enumerate(words))
+    """'CONSULTA MEDICA EM ATENCAO ESPECIALIZADA' → 'Consulta Medica em Atencao Especializada' (siglas em maiúsculas)."""
+    def fix(i: int, w: str) -> str:
+        core = w.strip("()-,.;:/")
+        if core in _UPPER_WORDS:
+            return w.upper()
+        if i > 0 and w in _LOWER_WORDS:
+            return w
+        return w[:1].upper() + w[1:]
+    return " ".join(fix(i, w) for i, w in enumerate(text.lower().split()))
 
 
 def load_seed() -> dict[str, SigtapRule]:

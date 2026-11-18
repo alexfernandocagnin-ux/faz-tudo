@@ -1,0 +1,27 @@
+ BDSIA202610b************************************************************ 06.08
+ SMS-EXEMPLO         SISTEMA DE INFORMACOES AMBULATORIAIS      SAS/DATASUS/0570
+ 17/11/2026        Situacao de Producao de APAC - OUT/2026             14:26:15
+ ******************************************************************************
+ Estab.Exec. : 9424377 - AMBULATORIO DE ATENCAO A SAUDE INTE
+ Estab.Solic.: 9424377  Numero da APAC Anterior : 0000000000000  C.Atend.:01 ELETIVO
+ APAC: 352670207523-7      Validade: 15/09/2026 - 15/10/2026  Tipo:UNICA
+ Proced.Princ:090101009 OCI PROGRESSAO DA AVALIACAO DIAGNOSTICA DE CANCER DE MAMA - 
+ Processamento:10/2026  Producao:10/2026 Serv/Class:   /                                            
+ Mot.Saida/Perm.: 15 - ALTA COM PREVISAO DE RETORNO P/ACOMP.PAC Dt. Alta : 15/10/2026
+ ------------------------------------------------------------------
+ Paciente   : 00000000000  - PACIENTE FICTICIA DE TESTE
+ Mae        : MAE FICTICIA DE TESTE          Nacion.: 010 BRASIL
+ Responsavel: A MESMA                          Sexo : F Dt.Nasc.: 01/01/1980
+ Municipio  : 350320  ARARAQUARA                               CEP : 00000000
+ ------------------------------------------------------------------
+ MEDICO SOLICITANTE: MEDICO FICTICIO
+ CNS: 700000000000005
+ *** INCONSISTENCIA(S) ENCONTRADA(S) EM PROCEDIMENTO(S) ***
+  
+ SQ PROC.       CBO   Qt.Prz. Equipe       Cnes Terc.  SITUACAO
+ 01 090101009-0 225255       1                          PROC.PRINC. EXIGE, PROC. SECUNDARIO OBRIGATORIO. 
+ 02 020101056-9 225255       1              2082527     SEM ERROS
+ 03 020301004-3 225148       1              2074044     SEM ERROS
+ 04 030101007-2 225255       1                          SEM ERROS
+                             4
+ -------------------------------------------------------------------------------

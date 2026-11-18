@@ -16,9 +16,10 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from faztudo import doctor, sigtap_remote  # noqa: E402
+from faztudo import sigtap_remote  # noqa: E402
 from faztudo.bpa import analyze, findings_to_csv, parse_bpa  # noqa: E402
-from faztudo.consistency import ConsistencySolver, decode_report, parse_report  # noqa: E402
+from faztudo.consistency import (ConsistencySolver, decode_report, looks_like_apac_mirror,  # noqa: E402
+                                 looks_like_consistency_report, parse_apac_mirror, parse_report)
 from faztudo.knowledge import load_knowledge  # noqa: E402
 from faztudo.sigtap import SigtapRepository  # noqa: E402
 from faztudo.sigtap_store import SigtapStore  # noqa: E402
@@ -87,67 +88,92 @@ def open_knowledge(entry_id: str) -> None:
 
 # ---------------------------------------------------------------- Solucionador SIA
 
+OWNER_TITLE = {
+    "BPA": "Mandar para a unidade",
+    "APAC": "Mandar para o prestador",
+    "CNES": "Setor do CNES",
+    "FPO": "Programação (FPO Magnético)",
+    "SIA": "Aqui no SIA (CPD)",
+}
+
+
 def page_solver() -> None:
     page_header("Solucionador SIA",
-                "Mande o relatório de ocorrências da consistência do SIA (R0350.OUT) e eu digo, problema por problema, "
-                "onde se resolve, para quem mandar e como corrigir.")
+                "Envie o relatório de erros da consistência do SIA e receba, pronto, o que cada estabelecimento precisa "
+                "corrigir — com a mensagem para mandar.")
 
-    upload = st.file_uploader("Relatório do SIA (R0350.OUT)", type=["out", "txt"], key="r0350",
-                              help="Fica na pasta do processamento, ex.: C:\\Datasus\\SIA\\SIA_2026_10_Processamento\\R0350.OUT")
+    uploads = st.file_uploader(
+        "Relatórios do SIA", type=["out", "txt"], accept_multiple_files=True, key="r0350",
+        help="R0350.OUT = ocorrências da consistência (obrigatório). R0330T.OUT = espelho das APACs (opcional: com ele eu "
+             "digo exatamente qual procedimento obrigatório faltou). Ficam na pasta do processamento, ex.: "
+             "C:\\Datasus\\SIA\\SIA_2026_10_Processamento")
 
-    if upload is not None:
-        data, name = upload.getvalue(), upload.name
-    else:
-        html('<div class="ft-card"><div class="ft-section" style="margin-top:0">O que você recebe</div>'
+    reports, mirrors = [], []
+    for up in uploads or []:
+        text = decode_report(up.getvalue())
+        if looks_like_consistency_report(text):
+            reports.append((up.name, text))
+        elif looks_like_apac_mirror(text):
+            mirrors += parse_apac_mirror(text)
+        else:
+            st.warning(f"**{up.name}** não é o R0350 (ocorrências da consistência) nem o R0330T (espelho das APACs). Ignorei.",
+                       icon=":material/warning:")
+
+    if not reports:
+        if mirrors:
+            st.info("Recebi o espelho das APACs. Envie também o **R0350.OUT** (ocorrências da consistência).",
+                    icon=":material/info:")
+        html('<div class="ft-card"><div class="ft-section" style="margin-top:0">Como usar</div>'
              + bullet_list([
-                 "Cada ocorrência explicada em português claro.",
-                 "Onde resolver — BPA, APAC, CNES, FPO ou aqui no SIA — e para qual estabelecimento mandar.",
-                 "O que dá para concluir das linhas do relatório e das regras do SIGTAP (faixa de idade, código certo, APACs sobrepostas…).",
-                 "Passo a passo para corrigir, e um texto pronto para colar no e-mail ou WhatsApp.",
+                 "Arraste o R0350.OUT da pasta do processamento do SIA. Se tiver erro de APAC, arraste junto o R0330T.OUT (espelho das APACs).",
+                 "Você recebe a lista do que fazer separada por estabelecimento, já com o motivo e a correção.",
+                 "Cada estabelecimento tem uma mensagem pronta: é só copiar e mandar no e-mail ou WhatsApp.",
              ]) + '</div>')
         return
 
-    try:
-        report = parse_report(decode_report(data), name)
-    except ValueError as exc:
-        st.error(str(exc), icon=":material/error:")
-        return
-
-    result = ConsistencySolver(sigtap(), KB).solve(report)
+    name, text = reports[0]
+    report = parse_report(text, name)
+    result = ConsistencySolver(sigtap(), KB).solve(report, mirrors)
 
     meta = " · ".join(x for x in [report.source_name, report.orgao, f"competência {report.competencia}",
-                                   report.bdsia_version, f"gerado em {report.generated_at}" if report.generated_at else ""] if x)
-    groups: dict[str, int] = {}
-    for p in result.problems:
-        groups[p.group] = groups.get(p.group, 0) + p.quantity
-    pills = " ".join(badge(f"{g}: {n} ocorrência(s)", GROUP_CLASS.get(g, "ft-gray")) for g, n in groups.items())
+                                   f"tabela SIGTAP {sigtap().competencia_display}" if sigtap().is_official else "",
+                                   f"{len(mirrors)} APAC(s) no espelho" if mirrors else ""] if x)
     html(f'<div class="ft-card"><div class="ft-meta">{e(meta)}</div>'
-         f'<div class="ft-headline">{e(result.headline)}</div><div class="ft-row">{pills}</div></div>')
-
-    for note in result.notes:
+         f'<div class="ft-headline">{e(result.headline)}</div></div>')
+    for note in result.notes[:-1]:
         st.info(note, icon=":material/info:")
 
-    text = result.to_plain_text()
-    c1, c2 = st.columns([1, 1])
-    c1.download_button("Baixar resposta (.txt)", text, file_name=f"resposta-{Path(name).stem}.txt",
-                       icon=":material/download:", use_container_width=True)
-    with c2.popover("Texto para copiar", icon=":material/content_copy:", use_container_width=True):
-        st.caption("Use o botão de copiar no canto do quadro.")
-        st.code(text, language=None, wrap_lines=True)
-
-    for i, p in enumerate(result.problems):
+    # ---------- 1. O que fazer, por responsável ----------
+    st.subheader("O que fazer")
+    for gi, g in enumerate(result.owners):
         with st.container(border=True):
-            css = GROUP_CLASS.get(p.group, "ft-gray")
-            html(f'<div class="ft-row">{badge(p.code, css)}<span class="ft-meta">{e(p.group_meaning)}</span>'
-                 f'<span class="ft-spacer"></span><span class="ft-qty">{e(p.quantity_display)}</span></div>'
-                 f'<div class="ft-title">{e(p.title)}</div><div class="ft-sia">No SIA: {e(p.description)}</div>')
+            where = f"{g.cnes_name} · CNES {g.cnes}" if g.cnes else ""
+            html(f'<div class="ft-row"><div class="ft-area-key" style="width:52px;height:52px">{e(g.area_key)}</div><div>'
+                 f'<div class="ft-section" style="margin:0">{e(OWNER_TITLE.get(g.area_key, g.area_label))}</div>'
+                 f'<div class="ft-title" style="margin:2px 0 0 0;font-size:1.12rem">{e(where or g.area_label)}</div>'
+                 f'<div class="ft-meta">{e(g.who)}</div></div></div>')
+            items = "".join(f'<li>{badge(i.code, "ft-red")} &nbsp;{e(i.text)}</li>' for i in g.items)
+            html(f'<ol class="ft-list" style="margin-top:12px">{items}</ol>')
+            with st.expander("Mensagem pronta para mandar", icon=":material/send:"):
+                st.code(g.message, language=None, wrap_lines=True)
+
+    text_all = result.to_plain_text()
+    st.download_button("Baixar tudo (.txt)", text_all, file_name=f"resposta-{Path(name).stem}.txt",
+                       icon=":material/download:")
+
+    # ---------- 2. Detalhes ----------
+    st.subheader("Detalhes de cada erro")
+    st.caption("Para quem quer entender o porquê. Para corrigir, a lista acima já basta.")
+    for i, p in enumerate(result.problems):
+        with st.expander(f"**{p.code}** — {p.title} · {p.quantity_display}"):
+            html(f'<div class="ft-meta">{e(p.group_meaning)}</div><div class="ft-sia">No SIA: {e(p.description)}</div>')
             if p.main_area:
                 html(area_html(p.main_area))
             for alt in p.areas[1:]:
                 html(alt_area_html(alt))
             html('<div class="ft-section">O que eu vi no seu relatório</div>' + bullet_list(p.findings))
             if p.steps:
-                html('<div class="ft-section">Como resolver</div>' + steps_html(p.steps))
+                html('<div class="ft-section">Passo a passo</div>' + steps_html(p.steps))
             if p.knowledge and st.button("Ver na Base de Erros", key=f"kb-{i}", icon=":material/menu_book:", type="tertiary"):
                 open_knowledge(p.knowledge.id)
 
@@ -241,7 +267,7 @@ def sigtap_tables_panel() -> None:
         recent = {t.competencia for t in (remote or [])[:12]}
         competencias = sorted(recent | set(stored), reverse=True)
         remote_by_comp = {t.competencia: t for t in (remote or [])}
-        header = st.columns([1.2, 1.6, 2.2, 1.4, 1.4])
+        header = st.columns([1.1, 1.4, 2.0, 1.3, 1.3, 1.2])
         for col, title in zip(header, ["Competência", "Versão", "Situação"]):
             col.markdown(f"**{title}**")
         for comp in competencias:
@@ -254,7 +280,7 @@ def sigtap_tables_panel() -> None:
                 status = "Baixada" + (" (há versão mais nova)" if outdated else "")
             else:
                 status = ":gray[Disponível no DATASUS]"
-            cols = st.columns([1.2, 1.6, 2.2, 1.4, 1.4], vertical_alignment="center")
+            cols = st.columns([1.1, 1.4, 2.0, 1.3, 1.3, 1.2], vertical_alignment="center")
             cols[0].write(f"{comp[4:]}/{comp[:4]}")
             cols[1].caption((t.version if t and t.version else (r.version if r else "—")))
             cols[2].markdown(status)
@@ -270,6 +296,11 @@ def sigtap_tables_panel() -> None:
                 if cols[4].button("Usar esta", key=f"use-{comp}", type="primary", icon=":material/check:",
                                   use_container_width=True, disabled=not manage):
                     s.use(comp)
+                    st.rerun()
+                if not t.from_project and cols[5].button("Apagar", key=f"del-{comp}", icon=":material/delete:",
+                                                         use_container_width=True, disabled=not manage,
+                                                         help="Apaga a tabela guardada (dá para baixar de novo depois)."):
+                    s.delete(comp)
                     st.rerun()
 
         st.divider()
@@ -347,60 +378,6 @@ def page_triador() -> None:
             column_config={"O que está errado": st.column_config.TextColumn(width="large")})
 
 
-# ---------------------------------------------------------------- Doutor TI
-
-DOCTOR_SCRIPT = (Path(__file__).resolve().parent / "assets" / "doutor-ti.ps1").read_text(encoding="utf-8-sig")
-DOCTOR_CLASS = {"critico": "ft-red", "atencao": "ft-amber", "info": "ft-gray", "ok": "ft-teal"}
-
-
-def page_doctor() -> None:
-    page_header("Doutor TI DATASUS",
-                "Examina o computador onde rodam SIA, BPA-Mag, APAC-Mag e SCNES: VirtualStore, Firebird (porta 3050), "
-                "midas.dll, BDE e espaço em disco.")
-
-    left, right = st.columns(2, gap="large")
-    with left:
-        html('<div class="ft-section" style="margin-top:0">Passo 1 — no computador do SIA</div>')
-        st.markdown("Abra o **PowerShell** (menu Iniciar → digite *PowerShell*), **cole** o script abaixo "
-                    "(botão direito do mouse) e aperte **Enter**. Ele **só lê**: não altera nem instala nada.")
-        st.code(DOCTOR_SCRIPT, language="powershell", height=220)
-        st.download_button("Ou baixe o script (.ps1)", DOCTOR_SCRIPT.encode("utf-8-sig"), file_name="doutor-ti.ps1",
-                           icon=":material/download:")
-    with right:
-        html('<div class="ft-section" style="margin-top:0">Passo 2 — envie o resultado</div>')
-        st.markdown("O script cria o arquivo **doutor-ti-resultado.json** na Área de Trabalho. Envie aqui:")
-        upload = st.file_uploader("Resultado do Doutor TI", type=["json"], key="doctor", label_visibility="collapsed")
-
-    if upload is None:
-        return
-    try:
-        result = doctor.load_result(upload.getvalue())
-    except ValueError as exc:
-        st.error(str(exc), icon=":material/error:")
-        return
-
-    items = doctor.analyze(result)
-    st.divider()
-    st.caption(f"{result.get('windows', 'Windows')} · examinado em {str(result.get('gerado_em', '')).replace('T', ' às ')}")
-    counts = {k: sum(i.status == k for i in items) for k in ("ok", "atencao", "critico", "info")}
-    m = st.columns(4)
-    m[0].metric("Tudo certo", counts["ok"], border=True)
-    m[1].metric("Pedem atenção", counts["atencao"], border=True)
-    m[2].metric("Críticos", counts["critico"], border=True)
-    m[3].metric("Informativos", counts["info"], border=True)
-
-    for i, item in enumerate(items):
-        with st.container(border=True):
-            html(f'<div class="ft-row">{badge(item.status_display, DOCTOR_CLASS[item.status])}'
-                 f'<span class="ft-meta">{e(item.category)}</span></div>'
-                 f'<div class="ft-title" style="font-size:1.08rem">{e(item.title)}</div>'
-                 f'<div style="margin-top:4px">{e(item.detected)}</div>'
-                 f'<div style="opacity:.78;margin-top:4px">{e(item.recommendation)}</div>')
-            if item.knowledge_id and st.button("Ver solução na Base de Erros", key=f"doc-kb-{i}",
-                                               icon=":material/menu_book:", type="tertiary"):
-                open_knowledge(item.knowledge_id)
-
-
 # ---------------------------------------------------------------- navegação
 
 PAGES = {
@@ -408,7 +385,6 @@ PAGES = {
     "base": st.Page(page_knowledge, title="Base de Erros", icon=":material/menu_book:", url_path="base-de-erros"),
     "sigtap": st.Page(page_sigtap, title="Consultor SIGTAP", icon=":material/table_view:", url_path="sigtap"),
     "triador": st.Page(page_triador, title="Triador BPA", icon=":material/fact_check:", url_path="triador"),
-    "doctor": st.Page(page_doctor, title="Doutor TI DATASUS", icon=":material/build:", url_path="doutor-ti"),
 }
 
 st.logo(str(Path(__file__).resolve().parent / "assets" / "logo.svg"), size="large")

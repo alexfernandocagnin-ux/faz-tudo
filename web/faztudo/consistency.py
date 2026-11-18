@@ -202,7 +202,124 @@ def parse_report(text: str, source_name: str) -> ConsistencyReport:
     return ConsistencyReport(source_name, orgao, competencia, version, generated, totals, records)
 
 
+# ====================================================================== espelho da APAC (R0330T)
+
+@dataclass
+class MirrorItem:
+    seq: str
+    procedure_code: str   # 10 dígitos
+    cbo: str
+    quantity: int
+    third_party_cnes: str
+    situation: str
+
+    @property
+    def has_error(self) -> bool:
+        return bool(self.situation) and "SEM ERRO" not in self.situation.upper()
+
+
+@dataclass
+class ApacMirror:
+    """Uma APAC do relatório "Situação de Produção de APAC" (o espelho). Dados do paciente NÃO são guardados."""
+    cnes: str
+    cnes_name: str
+    number: str           # 13 dígitos, sem traço (igual ao R0350)
+    validity: str
+    apac_type: str
+    principal: str        # 9 dígitos, como no relatório
+    principal_name: str
+    processing: str
+    production: str
+    exit_reason: str
+    items: list[MirrorItem] = field(default_factory=list)
+
+
+_MIRROR_ITEM = re.compile(r"^\s*(\d{2})\s+(\d{9})-(\d)\s+(\d{6})?\s+(\d+)\s+(.*?)\s*$")
+
+
+def looks_like_apac_mirror(text: str) -> bool:
+    return "SITUACAO DE PRODUCAO DE APAC" in text.upper()
+
+
+def parse_apac_mirror(text: str) -> list[ApacMirror]:
+    """Lê o espelho da APAC: cabeçalho de cada APAC e a tabela SQ/PROC./CBO/Qt./Cnes Terc./SITUACAO."""
+    lines = _ESC.sub("", text).replace("\f", "\n").replace("\r", "").split("\n")
+    mirrors: list[ApacMirror] = []
+    cnes = cnes_name = ""
+    current: ApacMirror | None = None
+    in_items = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("Estab.Exec."):
+            m = re.match(r"Estab\.Exec\.\s*:\s*(\d{7})\s*-?\s*(.*)", s)
+            if m:
+                cnes, cnes_name = m.group(1), m.group(2).strip()
+            continue
+        m = re.match(r"APAC:\s*([\d-]+)\s+Validade:\s*(.*?)\s+Tipo:\s*(\S+)", s)
+        if m:
+            current = ApacMirror(cnes, cnes_name, m.group(1).replace("-", ""), m.group(2).strip(), m.group(3),
+                                 "", "", "", "", "")
+            mirrors.append(current)
+            in_items = False
+            continue
+        if current is None:
+            continue
+        m = re.match(r"Proced\.Princ:\s*(\d{9})\s*(.*)", s)
+        if m:
+            current.principal, current.principal_name = m.group(1), m.group(2).strip(" -")
+            continue
+        m = re.match(r"Processamento:\s*(\S+)\s+Producao:\s*(\S+)", s)
+        if m:
+            current.processing, current.production = m.group(1), m.group(2)
+            continue
+        if s.startswith("Mot.Saida"):
+            current.exit_reason = s.split(":", 1)[1].split("Dt.")[0].strip() if ":" in s else ""
+            continue
+        if s.startswith("SQ PROC"):
+            in_items = True
+            continue
+        if in_items:
+            m = _MIRROR_ITEM.match(line)
+            if m:
+                rest = m.group(6)
+                third = ""
+                parts = rest.split(maxsplit=1)
+                if parts and re.fullmatch(r"\d{7}", parts[0]):
+                    third, rest = parts[0], parts[1] if len(parts) > 1 else ""
+                elif parts and parts[0].isdigit() and len(parts) > 1 and re.fullmatch(r"\d{7}", parts[1].split()[0]):
+                    sub = parts[1].split(maxsplit=1)  # coluna "Equipe" preenchida antes do CNES terceiro
+                    third, rest = sub[0], sub[1] if len(sub) > 1 else ""
+                current.items.append(MirrorItem(m.group(1), m.group(2) + m.group(3), m.group(4) or "",
+                                                int(m.group(5)), third, rest.strip()))
+            elif s.startswith("---"):
+                in_items = False
+    return mirrors
+
+
 # ====================================================================== solucionador
+
+COMPAT_OBRIGATORIA = "5"  # SIGTAP: "Obrigatória (APAC principal x APAC secundário)" — código 5
+
+
+@dataclass
+class ActionItem:
+    """Uma coisa a fazer, já respondida, para um responsável (área + estabelecimento)."""
+    area_key: str
+    cnes: str
+    cnes_name: str
+    code: str
+    text: str
+
+
+@dataclass
+class OwnerGroup:
+    area_key: str
+    area_label: str
+    who: str
+    cnes: str
+    cnes_name: str
+    items: list[ActionItem]
+    message: str
 
 @dataclass
 class ResolvedArea:
@@ -227,6 +344,7 @@ class ProblemExplanation:
     steps: tuple[GuidedStep, ...]
     records: list[OccurrenceRecord]
     areas: list[ResolvedArea]
+    actions: list[ActionItem] = field(default_factory=list)
 
     @property
     def quantity_display(self) -> str:
@@ -252,13 +370,19 @@ class SolverResult:
     def total_occurrences(self) -> int:
         return sum(p.quantity for p in self.problems)
 
+    owners: list[OwnerGroup] = field(default_factory=list)
+
     @property
     def establishment_count(self) -> int:
         return len({r.cnes for r in self.report.records})
 
     def to_plain_text(self) -> str:
         out = [f"Relatório de consistência do SIA — {self.report.orgao} — competência {self.report.competencia}",
-               self.headline]
+               self.headline, "", "O QUE FAZER, POR RESPONSÁVEL"]
+        for g in self.owners:
+            out += ["", f"▶ {g.area_label} — CNES {g.cnes} {g.cnes_name}".rstrip()]
+            out += [f"   • [{i.code}] {i.text}" for i in g.items]
+        out += ["", "DETALHES DE CADA OCORRÊNCIA"]
         for n, p in enumerate(self.problems, start=1):
             out += ["", f"{n}. [{p.code}] {p.title} — {p.quantity_display}"]
             for a in p.areas:
@@ -293,18 +417,21 @@ class ConsistencySolver:
         self.sigtap = sigtap
         self.kb = kb
 
-    def solve(self, report: ConsistencyReport) -> SolverResult:
+    def solve(self, report: ConsistencyReport, mirrors: list[ApacMirror] | None = None) -> SolverResult:
+        self.mirrors = {m.number: m for m in (mirrors or [])}
         totals = report.totals or self._totals_from_records(report)
         problems = []
         for t in totals:
             records = [r for r in report.records if r.code == t.code and r.description == t.description]
             entry = self.kb.by_id(self.kb.sia_codes.get(t.code))
-            problems.append(ProblemExplanation(
+            problem = ProblemExplanation(
                 code=t.code, group=t.group, group_meaning=GROUP_MEANINGS.get(t.group, ""), description=t.description,
                 quantity=t.quantity, title=entry.title if entry else t.description.capitalize(), knowledge=entry,
                 findings=self._findings(t.code, records, entry is None, t.quantity),
                 steps=entry.guided_steps if entry else (), records=records,
-                areas=self._areas(entry, t, records)))
+                areas=self._areas(entry, t, records))
+            problem.actions = self._actions(problem)
+            problems.append(problem)
         problems.sort(key=lambda p: (GROUP_ORDER.get(p.group, 9), -p.quantity))
 
         total = sum(p.quantity for p in problems)
@@ -322,9 +449,159 @@ class ConsistencySolver:
         if not self.sigtap.is_official:
             notes.append("Estou usando a base de exemplo do SIGTAP. Importe a tabela oficial da competência (Consultor SIGTAP) "
                          "para eu dizer faixas de idade, quantidades máximas e CIDs aceitos de todos os procedimentos.")
+        if any(p.code == "ERRo" for p in problems) and not self.mirrors:
+            notes.append("Dica: envie também o espelho das APACs (R0330T.OUT, \"Situação de Produção de APAC\") que eu digo "
+                         "exatamente qual procedimento obrigatório ficou faltando em cada APAC.")
         notes.append("Depois de corrigir na origem (prontuário, BPA-Mag, APAC-Mag, CNES ou FPO), reimporte e rode a "
                      "consistência de novo.")
-        return SolverResult(report, problems, headline, notes)
+        result = SolverResult(report, problems, headline, notes)
+        result.owners = self._owners(problems, report)
+        return result
+
+    # ------------------------------------------------------------ respostas prontas
+    def _proc(self, code: str) -> str:
+        rule = self.sigtap.find(code)
+        return f"{rule.formatted_code} {rule.name}" if rule else code
+
+    def _obligatory(self, principal: str) -> list[tuple[str, int]]:
+        rule = self.sigtap.find(principal)
+        return [(c, q) for c, q, t in (rule.compatibles if rule else []) if t == COMPAT_OBRIGATORIA]
+
+    def _actions(self, p: ProblemExplanation) -> list[ActionItem]:
+        area = p.main_area.key if p.main_area else "BPA"
+        out: list[ActionItem] = []
+        by_cnes: dict[tuple[str, str], list[OccurrenceRecord]] = {}
+        for r in p.records:
+            by_cnes.setdefault((r.cnes, r.cnes_name), []).append(r)
+        if not by_cnes:  # código sem linhas detalhadas
+            out.append(ActionItem(area, "", "", p.code, f"{p.title}: {p.group_meaning}"))
+            return out
+
+        for (cnes, name), recs in by_cnes.items():
+            texts = self._answer(p, recs)
+            out += [ActionItem(area, cnes, name, p.code, t) for t in texts]
+        return out
+
+    def _answer(self, p: ProblemExplanation, recs: list[OccurrenceRecord]) -> list[str]:
+        code = p.code
+        fichas = ", ".join(dict.fromkeys(r.reference for r in recs))
+        apacs = list(dict.fromkeys(r.reference for r in recs))
+        kind = "Ficha" if len(recs) == 1 else "Fichas"
+
+        if code == "FET2":
+            texts = []
+            for proc in dict.fromkeys(r.procedure_code for r in recs):
+                refs = ", ".join(r.reference for r in recs if r.procedure_code == proc)
+                rule = self.sigtap.find(proc)
+                if not rule:
+                    texts.append(f"Fichas {refs}: idade do paciente fora da faixa do procedimento {proc}. Confira a data de nascimento.")
+                    continue
+                text = (f"Fichas {refs}: {rule.formatted_code} ({rule.name}) só aceita pacientes de {rule.age_range_display}. "
+                        "Confira a data de nascimento no cadastro")
+                if rule.code in AGE_ALTERNATIVES:
+                    alt = self.sigtap.find(AGE_ALTERNATIVES[rule.code][0])
+                    text += (f"; se estiver certa e o exame não for de rastreamento, lance como "
+                             f"{alt.formatted_code} ({alt.name})" if alt else "")
+                texts.append(text + ".")
+            return texts
+        if code == "ERR8":
+            return [f"{kind} {fichas}: município de residência do paciente inválido. Corrigir o código IBGE do município "
+                    "(6 dígitos, ex.: 350320 = Araraquara) no cadastro do paciente e reenviar a remessa."]
+        if code == "ERRI":
+            return [f"{kind} {fichas}: raça/cor do paciente inválida. Informar 01 Branca, 02 Preta, 03 Parda, 04 Amarela "
+                    "ou 05 Indígena (a 05 exige o código da etnia)."]
+        if code == "ERRj":
+            return [f"{kind} {fichas}: CPF do paciente com dígito verificador errado. Corrigir o CPF no cadastro "
+                    "(ou informar o CNS válido do paciente)."]
+        if code == "ERRo":
+            return [self._answer_secondary(n, [r for r in recs if r.reference == n]) for n in apacs]
+        if code == "QTD2":
+            texts = []
+            for r in recs:
+                rule = self.sigtap.find(r.procedure_code)
+                limit = f"o máximo permitido no SIGTAP é {rule.max_quantity}" if rule and rule.max_quantity else "passou do máximo"
+                texts.append(f"APAC {r.reference} (comp. {r.competencia}): {self._proc(r.procedure_code)} — {limit}. "
+                             "Corrigir a quantidade lançada (ou remover a linha repetida).")
+            return texts
+        if code == "9Q":
+            texts = []
+            for r in recs:
+                rule = self.sigtap.find(r.procedure_code)
+                cids = f" CIDs aceitos pelo SIGTAP: {_join(rule.allowed_cids, 12)}." if rule and rule.allowed_cids else ""
+                texts.append(f"APAC {r.reference}: o CID informado não é aceito para {self._proc(r.procedure_code)}.{cids} "
+                             "Trocar pelo CID correto que estiver no laudo médico.")
+            return texts
+        if code == "Y8":
+            texts = []
+            for r in recs:
+                rule = self.sigtap.find(r.procedure_code)
+                fixed = any("2 competências" in d for d in self.sigtap.detail_text(rule)) if rule else True
+                rule_txt = "o SIGTAP define validade fixa de 2 competências para esta APAC" if fixed else \
+                    "a APAC tem validade de 2 competências"
+                texts.append(f"APAC {r.reference} (comp. {r.competencia}, {self._proc(r.procedure_code)}): {rule_txt} e ela "
+                             "foi apresentada fora desse prazo. Não dá para cobrar nesta APAC; se o cuidado continua, "
+                             "é preciso emitir uma APAC nova.")
+            return texts
+        if code in ("67", "12"):
+            fix = ("Encerrar a APAC anterior com motivo de saída por mudança de procedimento, na competência em que a nova "
+                   "começou, e apresentar a nova como APAC inicial.")
+            texts = []
+            for r in recs if code == "12" else [recs]:
+                rows = [r] if code == "12" else r
+                conflicts = self._apac_conflicts(rows)
+                prefix = (f"APAC {r.reference}: apresentada como continuidade, mas na competência anterior não houve "
+                          "permanência no mesmo procedimento. ") if code == "12" else ""
+                for c in conflicts or [""]:
+                    c = c.replace(" Como o procedimento mudou, a anterior precisa estar encerrada (mudança de procedimento) "
+                                  "antes do início da nova, e a nova entra como APAC inicial.", "")
+                    texts.append(f"{prefix}{c} {fix}".strip())
+            return texts
+        # Sem regra específica: descrição do SIA + o primeiro passo da base de erros.
+        first = p.steps[0].action_title if p.steps else p.group_meaning
+        refs = ", ".join(apacs)
+        return [f"{refs}: {p.description.capitalize()}. {first}."]
+
+    def _answer_secondary(self, apac: str, recs: list[OccurrenceRecord]) -> str:
+        principal = recs[0].procedure_code if recs else ""
+        obligatory = self._obligatory(principal)
+        names = "; ".join(f"{self._proc(c)} (qtd. {q})" for c, q in obligatory)
+        mirror = self.mirrors.get(apac)
+        if mirror and obligatory:
+            launched = {i.procedure_code for i in mirror.items}
+            missing = [(c, q) for c, q in obligatory if c not in launched]
+            done = "; ".join(self._proc(i.procedure_code) for i in mirror.items if i.procedure_code[:9] != principal[:9])
+            if missing:
+                miss = "; ".join(f"{self._proc(c)} (qtd. {q})" for c, q in missing)
+                return (f"APAC {apac} ({self._proc(principal)}): FALTA lançar o secundário obrigatório {miss}. "
+                        f"Já lançados: {done or 'nenhum'}. Incluir na APAC e reapresentar "
+                        "(se não foi realizado, a OCI não está completa).")
+            return (f"APAC {apac} ({self._proc(principal)}): todos os obrigatórios ({names}) estão lançados no espelho — "
+                    "confira a quantidade e o CBO de cada um.")
+        if obligatory:
+            return (f"APAC {apac} ({self._proc(principal)}): o SIGTAP exige os secundários obrigatórios {names}. "
+                    "Confira no espelho da APAC e inclua os que faltarem.")
+        return (f"APAC {apac} ({self._proc(principal)}): falta procedimento secundário obrigatório. "
+                "Confira as compatibilidades obrigatórias do procedimento no SIGTAP e inclua na APAC.")
+
+    def _owners(self, problems: list[ProblemExplanation], report: ConsistencyReport) -> list[OwnerGroup]:
+        groups: dict[tuple[str, str], OwnerGroup] = {}
+        for p in problems:
+            for a in p.actions:
+                key = (a.area_key, a.cnes)
+                if key not in groups:
+                    info = self.kb.areas.get(a.area_key)
+                    groups[key] = OwnerGroup(a.area_key, info.label if info else a.area_key, info.who if info else "",
+                                             a.cnes, a.cnes_name, [], "")
+                groups[key].items.append(a)
+        order = {"BPA": 0, "APAC": 1, "CNES": 2, "FPO": 3, "SIA": 4}
+        result = sorted(groups.values(), key=lambda g: (order.get(g.area_key, 9), g.cnes_name))
+        for g in result:
+            lines = [f"Olá! Na consistência do SIA da competência {report.competencia}, a produção do "
+                     f"{g.cnes_name or 'estabelecimento'} (CNES {g.cnes}) teve estes problemas:", ""]
+            lines += [f"{n}. {i.text}" for n, i in enumerate(g.items, start=1)]
+            lines += ["", "Por favor, corrijam no sistema de origem e reenviem a remessa. Qualquer dúvida, falem com o CPD."]
+            g.message = "\n".join(lines)
+        return result
 
     @staticmethod
     def _totals_from_records(report: ConsistencyReport) -> list[OccurrenceTotal]:
