@@ -152,32 +152,60 @@ def page_solver() -> None:
     report = parse_report(text, name)
     result = ConsistencySolver(sigtap(), KB).solve(report, mirrors)
 
-    # ---------- Resumo ----------
+    # ---------- Filtro: BPA (BPA Magnético) fica escondido por padrão ----------
     meta = " · ".join(x for x in [report.source_name, report.orgao, f"competência {report.competencia}",
                                    f"tabela SIGTAP {sigtap().competencia_display}" if sigtap().is_official else "",
                                    f"espelho com {len(mirrors)} APAC(s)" if mirrors else ""] if x)
     st.caption(meta)
+
+    def is_bpa(p) -> bool:
+        return bool(p.main_area) and p.main_area.key == "BPA"
+
+    n_bpa = sum(p.quantity for p in result.problems if is_bpa(p))
+    n_other = result.total_occurrences - n_bpa
+    options = {f"APAC e outros ({n_other})": "outros", f"Tudo ({result.total_occurrences})": "tudo",
+               f"Só BPA ({n_bpa})": "bpa"}
+    chosen = st.segmented_control(
+        "Mostrar", list(options), default=list(options)[0], key=f"solver-filter-{n_other}-{n_bpa}",
+        help="Os erros de BPA o BPA Magnético corrige sozinho, por isso ficam escondidos por padrão.")
+    scope = options.get(chosen or list(options)[0], "outros")
+
+    def visible(bpa: bool) -> bool:
+        return scope == "tudo" or (scope == "bpa") == bpa
+
+    problems = [p for p in result.problems if visible(is_bpa(p))]
+    owners = [g for g in result.owners if visible(g.area_key == "BPA")]
+    owners.sort(key=lambda g: (g.area_key == "BPA", not g.cnes))  # estabelecimentos primeiro; "Outros" e BPA no fim
+
     m = st.columns(4)
-    m[0].metric("Ocorrências", result.total_occurrences, border=True)
-    m[1].metric("Estabelecimentos", result.establishment_count, border=True)
-    m[2].metric("Tipos de erro", len(result.problems), border=True)
-    blocking = sum(p.quantity for p in result.problems if p.is_blocking)
-    m[3].metric("Impedem aprovação", blocking, border=True)
+    m[0].metric("Ocorrências", sum(p.quantity for p in problems), border=True)
+    m[1].metric("Estabelecimentos", len({g.cnes for g in owners if g.cnes}), border=True)
+    m[2].metric("Tipos de erro", len(problems), border=True)
+    m[3].metric("Impedem aprovação", sum(p.quantity for p in problems if p.is_blocking), border=True)
+    if scope == "outros" and n_bpa:
+        st.caption(f":material/visibility_off: {n_bpa} ocorrência(s) de BPA escondida(s) — o BPA Magnético corrige sozinho. "
+                   "Para ver, escolha \"Tudo\" ou \"Só BPA\".")
     for note in result.notes[:-1]:
         st.info(note, icon=":material/info:")
+
+    if not owners:
+        st.success("Nada para corrigir aqui. " + ("Só há erros de BPA, que o BPA Magnético corrige sozinho." if n_bpa else ""),
+                   icon=":material/check_circle:")
+        return
 
     # ---------- Uma aba por responsável + detalhes ----------
     def tab_label(g) -> str:
         name = title_pt(g.cnes_name) if g.cnes_name else "Outros"
-        return f"{name[:30] + ('…' if len(name) > 30 else '')} ({len(g.items)})"
+        prefix = "BPA · " if g.area_key == "BPA" and scope == "tudo" else ""
+        name = prefix + name
+        return f"{name[:32] + ('…' if len(name) > 32 else '')} ({len(g.items)})"
 
-    labels = [tab_label(g) for g in result.owners]
-    tabs = st.tabs(labels + ["Detalhes técnicos"])
-    for tab, g in zip(tabs, result.owners):
+    tabs = st.tabs([tab_label(g) for g in owners] + ["Detalhes técnicos"])
+    for tab, g in zip(tabs, owners):
         with tab:
             owner_panel(g)
     with tabs[-1]:
-        technical_details(result, name)
+        technical_details(result, name, problems)
 
 
 def owner_panel(g) -> None:
@@ -208,11 +236,11 @@ def owner_panel(g) -> None:
                  + "".join(f'<div class="ft-note">{e(n)}</div>' for n in item.notes))
 
 
-def technical_details(result, name: str) -> None:
+def technical_details(result, name: str, problems=None) -> None:
     st.caption("Explicação completa de cada código de erro, para quem quer entender o porquê.")
     st.download_button("Baixar tudo em texto (.txt)", result.to_plain_text(), file_name=f"resposta-{Path(name).stem}.txt",
                        icon=":material/download:")
-    for i, p in enumerate(result.problems):
+    for i, p in enumerate(result.problems if problems is None else problems):
         with st.expander(f"**{p.code}** — {p.title} · {p.quantity_display}"):
             html(f'<div class="ft-meta">{e(p.group_meaning)}</div><div class="ft-sia">No SIA: {e(p.description)}</div>')
             if p.main_area:
