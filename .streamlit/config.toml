@@ -7,6 +7,10 @@ maxUploadSize = 200
 [browser]
 gatherUsageStats = false
 
+[client]
+# Esconde o menu de desenvolvedor (Deploy, rerun, etc.) para quem usa o site.
+toolbarMode = "minimal"
+
 [theme]
 baseRadius = "0.6rem"
 showSidebarBorder = true

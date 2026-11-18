@@ -16,7 +16,6 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from faztudo import SAMPLES_DIR  # noqa: E402
 from faztudo.bpa import analyze, findings_to_csv, parse_bpa  # noqa: E402
 from faztudo.consistency import ConsistencySolver, decode_report, parse_report  # noqa: E402
 from faztudo.knowledge import load_knowledge  # noqa: E402
@@ -59,20 +58,11 @@ def page_solver() -> None:
                 "Mande o relatório de ocorrências da consistência do SIA (R0350.OUT) e eu digo, problema por problema, "
                 "onde se resolve, para quem mandar e como corrigir.")
 
-    col_up, col_demo = st.columns([4, 1.3], vertical_alignment="bottom")
-    with col_up:
-        upload = st.file_uploader("Relatório do SIA (R0350.OUT)", type=["out", "txt"], key="r0350",
-                                  help="Fica na pasta do processamento, ex.: C:\\Datasus\\SIA\\SIA_2026_10_Processamento\\R0350.OUT")
-    with col_demo:
-        if st.button("Testar com o exemplo", icon=":material/science:", use_container_width=True):
-            st.session_state["solver_demo"] = True
+    upload = st.file_uploader("Relatório do SIA (R0350.OUT)", type=["out", "txt"], key="r0350",
+                              help="Fica na pasta do processamento, ex.: C:\\Datasus\\SIA\\SIA_2026_10_Processamento\\R0350.OUT")
 
     if upload is not None:
         data, name = upload.getvalue(), upload.name
-        st.session_state["solver_demo"] = False
-    elif st.session_state.get("solver_demo"):
-        sample = SAMPLES_DIR / "R0350-exemplo.OUT"
-        data, name = sample.read_bytes(), sample.name
     else:
         html('<div class="ft-card"><div class="ft-section" style="margin-top:0">O que você recebe</div>'
              + bullet_list([
@@ -205,16 +195,10 @@ def page_sigtap() -> None:
 
 def page_triador() -> None:
     page_header("Triador BPA", "Descubra antes do envio quais linhas da remessa o SIA vai rejeitar — e quanto isso custa.")
-    col_up, col_demo = st.columns([4, 1.3], vertical_alignment="bottom")
-    upload = col_up.file_uploader("Remessa do BPA-Mag (PA*.* ou .txt)", key="bpa")
-    if col_demo.button("Testar com o exemplo", icon=":material/science:", use_container_width=True, key="bpa_demo_button"):
-        st.session_state["bpa_demo"] = True
+    upload = st.file_uploader("Remessa do BPA-Mag (PA*.* ou .txt)", key="bpa")
 
     if upload is not None:
         data, name = upload.getvalue(), upload.name
-    elif st.session_state.get("bpa_demo"):
-        sample = SAMPLES_DIR / "remessa-bpa-exemplo.txt"
-        data, name = sample.read_bytes(), sample.name
     else:
         st.caption("Verifica: CNS do paciente e do profissional · CBO × procedimento · sexo · faixa etária · instrumento "
                    "(BPA-C/BPA-I) · CID · raça/cor e etnia · competência.")
