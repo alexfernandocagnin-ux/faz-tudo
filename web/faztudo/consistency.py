@@ -629,6 +629,11 @@ class ConsistencySolver:
                     overlap = f"{_fmt(apacs[1].start)} a {_fmt(end_a)}"
             yield patient, apacs, overlap
 
+    def _codes(self, items: list[tuple[str, int]]) -> str:
+        """'o 02.01.01.058-5' ou 'o 02.01.01.058-5 e o 02.03.01.004-3'."""
+        codes = [f"o {r.formatted_code}" if (r := self.sigtap.find(c)) else f"o {c}" for c, _ in items]
+        return codes[0] if len(codes) == 1 else ", ".join(codes[:-1]) + " e " + codes[-1]
+
     def _answer_secondary(self, apac: str, recs: list[OccurrenceRecord]):
         principal = recs[0].procedure_code if recs else ""
         obligatory = self._obligatory(principal)
@@ -650,8 +655,9 @@ class ConsistencySolver:
                     "Todos os obrigatórios estão lançados no espelho: confira a quantidade e o CBO de cada um.", flagged)
         if obligatory:
             return (title, [apac], "APAC", f"{self._proc(principal)}: o SIGTAP exige os secundários obrigatórios {names}.",
-                    "Conferir no espelho da APAC (R0330T) qual desses procedimentos obrigatórios não foi lançado e lançar "
-                    "na APAC antes de reapresentar.", [])
+                    f"Conferir no espelho da APAC (R0330T) se {self._codes(obligatory)} "
+                    f"{'estão lançados' if len(obligatory) > 1 else 'está lançado'}. "
+                    f"{'O que não estiver' if len(obligatory) > 1 else 'Se não estiver'}, lançar na APAC e reapresentar.", [])
         return (title, [apac], "APAC", f"{self._proc(principal)}: falta procedimento secundário obrigatório.",
                 "Conferir as compatibilidades obrigatórias do procedimento no SIGTAP e incluir na APAC.", [])
 
