@@ -16,9 +16,25 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+
+def _reload_changed_modules() -> None:
+    """Ao atualizar o site, o Streamlit Cloud reexecuta o app.py mas mantém os módulos antigos na memória
+    (foi o que causou um ImportError). Se algum arquivo do motor mudou, descarta a versão carregada."""
+    base = Path(__file__).resolve().parent
+    files = sorted([*base.glob("faztudo/*.py"), base / "ui.py"])
+    stamp = tuple((f.name, f.stat().st_mtime) for f in files if f.exists())
+    if getattr(sys, "_conserta_sia_stamp", None) != stamp:
+        for name in [n for n in sys.modules if n == "ui" or n == "faztudo" or n.startswith("faztudo.")]:
+            del sys.modules[name]
+        sys._conserta_sia_stamp = stamp
+
+
+_reload_changed_modules()
+
 from faztudo import sigtap_remote  # noqa: E402
 from faztudo.bpa import analyze, findings_to_csv, parse_bpa  # noqa: E402
-from faztudo.consistency import (ConsistencySolver, decode_report, looks_like_apac_mirror,  # noqa: E402
+from faztudo.consistency import (COMPAT_OBRIGATORIA, ConsistencySolver, decode_report,  # noqa: E402
+                                 looks_like_apac_mirror,
                                  looks_like_consistency_report, parse_apac_mirror, parse_report)
 from faztudo.knowledge import load_knowledge  # noqa: E402
 from faztudo.sigtap import SigtapRepository  # noqa: E402
@@ -214,23 +230,75 @@ def page_knowledge() -> None:
 # ---------------------------------------------------------------- Consultor SIGTAP
 
 def page_sigtap() -> None:
-    page_header("Consultor SIGTAP", "Regras de cada procedimento: instrumento, CBOs aceitos, sexo, faixa etária, CIDs e valor.")
-    sigtap_tables_panel()
+    page_header("Consultor SIGTAP", "Digite o código ou o nome e veja a ficha completa do procedimento: o que ele exige, "
+                                    "o que aceita e quais secundários são obrigatórios.")
     repo = sigtap()
 
     c1, c2 = st.columns([1, 1], vertical_alignment="bottom")
     query = c1.text_input("Buscar procedimento", placeholder="Código (com ou sem pontos), nome, CBO ou financiamento")
     instrument = c2.segmented_control("Instrumento", ["Todos", "BPA-C", "BPA-I", "APAC", "RAAS", "AIH"], default="Todos")
     results = repo.search(query, instrument or "Todos")
-    st.caption(f"{len(results)} de {len(repo.procedures)} procedimentos" +
+    st.caption(f"{len(results)} de {len(repo.procedures)} procedimentos · tabela {repo.competencia_display or 'de exemplo'}" +
                (" (mostrando os primeiros 250 — refine a busca)" if len(results) >= 250 else ""))
+
+    if results:
+        chosen = st.selectbox("Ficha do procedimento", results, index=0 if query else None,
+                              format_func=lambda r: f"{r.formatted_code} — {r.name}",
+                              placeholder="Escolha um procedimento da lista para ver a ficha completa")
+        if chosen:
+            procedure_card(repo, chosen)
+
     st.dataframe(
         [{"Código": r.formatted_code, "Procedimento": r.name, "Instrumento": r.instruments_display, "Sexo": r.sex_display,
-          "Idade": r.age_range_display, "CBOs aceitos": r.cbo_summary, "CIDs": len(r.allowed_cids) or "—",
-          "Qtd. máx.": r.max_quantity or "—", "Valor SA": format_brl(r.unit_value), "Financiamento": r.financing}
+          "Idade": r.age_range_display, "CBOs aceitos": r.cbo_summary,
+          "CIDs": str(len(r.allowed_cids)) if r.allowed_cids else "—",
+          "Obrigatórios": str(sum(1 for c in r.compatibles if c[2] == COMPAT_OBRIGATORIA) or "—"),
+          "Qtd. máx.": str(r.max_quantity) if r.max_quantity else "—", "Valor SA": format_brl(r.unit_value),
+          "Financiamento": r.financing}
          for r in results],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
         column_config={"Procedimento": st.column_config.TextColumn(width="large")})
+
+    st.divider()
+    sigtap_tables_panel()
+
+
+def procedure_card(repo: SigtapRepository, r) -> None:
+    """Ficha do procedimento com tudo o que a tabela oficial traz."""
+    def name_of(code: str) -> str:
+        other = repo.find(code)
+        return f"{other.formatted_code} — {other.name}" if other else code
+
+    obligatory = [c for c in r.compatibles if c[2] == COMPAT_OBRIGATORIA]
+    others = [c for c in r.compatibles if c[2] != COMPAT_OBRIGATORIA]
+    with st.container(border=True):
+        html(f'<div class="ft-row">{badge(r.formatted_code, "ft-teal")}<span class="ft-meta">{e(r.financing)} · '
+             f'{e(r.instruments_display)}</span></div><div class="ft-title">{e(r.name)}</div>')
+        m = st.columns(4)
+        m[0].metric("Valor (SA)", format_brl(r.unit_value))
+        m[1].metric("Sexo", r.sex_display)
+        m[2].metric("Idade", r.age_range_display)
+        m[3].metric("Qtd. máxima", str(r.max_quantity) if r.max_quantity else "—")
+
+        if obligatory:
+            html('<div class="ft-section">Secundários obrigatórios (têm que estar lançados na APAC)</div>'
+                 + bullet_list([f"{name_of(c)} — quantidade {q}" for c, q, _ in obligatory]))
+        if others:
+            with st.expander(f"Outros procedimentos secundários permitidos ({len(others)})"):
+                html(bullet_list([f"{name_of(c)} — até {q}" if q else name_of(c) for c, q, _ in others]))
+        rules = repo.rule_texts(r)
+        details = repo.detail_text(r)
+        if details:
+            html('<div class="ft-section">Observações do SIGTAP</div>' + bullet_list(details))
+        if rules:
+            with st.expander(f"Regras condicionadas ({len(rules)})"):
+                for title, desc in rules:
+                    st.markdown(f"**{title}** — {desc}")
+        a, b = st.columns(2)
+        with a.expander(f"CBOs aceitos ({'qualquer' if '*' in r.allowed_cbos else len(r.allowed_cbos)})"):
+            st.write("Qualquer CBO habilitado." if "*" in r.allowed_cbos else ", ".join(r.allowed_cbos))
+        with b.expander(f"CIDs aceitos como principal ({len(r.allowed_cids) or 'sem restrição'})"):
+            st.write(", ".join(r.allowed_cids) if r.allowed_cids else "O SIGTAP não restringe CID para este procedimento.")
 
 
 def sigtap_tables_panel() -> None:
@@ -285,7 +353,7 @@ def sigtap_tables_panel() -> None:
             cols[1].caption((t.version if t and t.version else (r.version if r else "—")))
             cols[2].markdown(status)
             if (t is None or outdated) and r is not None:
-                if cols[3].button("Baixar", key=f"dl-{comp}", icon=":material/download:", use_container_width=True):
+                if cols[3].button("Baixar", key=f"dl-{comp}", icon=":material/download:", width="stretch"):
                     with st.spinner(f"Baixando {r.filename} do DATASUS…"):
                         try:
                             s.download(r, sigtap_remote.download)
@@ -294,11 +362,11 @@ def sigtap_tables_panel() -> None:
                     st.rerun()
             if t is not None and not in_use:
                 if cols[4].button("Usar esta", key=f"use-{comp}", type="primary", icon=":material/check:",
-                                  use_container_width=True, disabled=not manage):
+                                  width="stretch", disabled=not manage):
                     s.use(comp)
                     st.rerun()
                 if not t.from_project and cols[5].button("Apagar", key=f"del-{comp}", icon=":material/delete:",
-                                                         use_container_width=True, disabled=not manage,
+                                                         width="stretch", disabled=not manage,
                                                          help="Apaga a tabela guardada (dá para baixar de novo depois)."):
                     s.delete(comp)
                     st.rerun()
@@ -374,7 +442,7 @@ def page_triador() -> None:
               "O que está errado": f.description,
               "Valor": format_brl(summary.line_values.get(f.record.line_number, 0))}
              for f in summary.findings],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
             column_config={"O que está errado": st.column_config.TextColumn(width="large")})
 
 
