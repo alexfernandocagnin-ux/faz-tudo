@@ -303,12 +303,33 @@ COMPAT_OBRIGATORIA = "5"  # SIGTAP: "Obrigatória (APAC principal x APAC secund�
 
 @dataclass
 class ActionItem:
-    """Uma coisa a fazer, já respondida, para um responsável (área + estabelecimento)."""
+    """Uma coisa a fazer, já respondida, para um responsável (área + estabelecimento).
+
+    Separado em partes para a tela ficar legível: título curto, onde (fichas/APACs), problema e como corrigir.
+    """
     area_key: str
     cnes: str
     cnes_name: str
     code: str
-    text: str
+    title: str
+    refs: list[str]
+    ref_label: str          # "Ficha", "APAC"…
+    problem: str
+    fix: str
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def where(self) -> str:
+        if not self.refs:
+            return ""
+        label = self.ref_label + ("s" if len(self.refs) > 1 and not self.ref_label.endswith("s") else "")
+        return f"{label} {', '.join(self.refs)}"
+
+    @property
+    def text(self) -> str:
+        """Tudo numa linha (para a mensagem e o texto corrido)."""
+        parts = [f"{self.where}: {self.title}." if self.where else f"{self.title}.", self.problem, self.fix, *self.notes]
+        return " ".join(x.strip() for x in parts if x and x.strip())
 
 
 @dataclass
@@ -380,8 +401,12 @@ class SolverResult:
         out = [f"Relatório de consistência do SIA — {self.report.orgao} — competência {self.report.competencia}",
                self.headline, "", "O QUE FAZER, POR RESPONSÁVEL"]
         for g in self.owners:
-            out += ["", f"▶ {g.area_label} — CNES {g.cnes} {g.cnes_name}".rstrip()]
-            out += [f"   • [{i.code}] {i.text}" for i in g.items]
+            out += ["", f"▶ {g.cnes_name} (CNES {g.cnes}) — {g.area_label}" if g.cnes else f"▶ {g.area_label}"]
+            for i in g.items:
+                out.append(f"   • [{i.code}] {i.title}" + (f" — {i.where}" if i.where else ""))
+                out.append(f"     Problema: {i.problem}")
+                out.append(f"     Como corrigir: {i.fix}")
+                out += [f"     Obs.: {n}" for n in i.notes]
         out += ["", "DETALHES DE CADA OCORRÊNCIA"]
         for n, p in enumerate(self.problems, start=1):
             out += ["", f"{n}. [{p.code}] {p.title} — {p.quantity_display}"]
@@ -469,102 +494,132 @@ class ConsistencySolver:
 
     def _actions(self, p: ProblemExplanation) -> list[ActionItem]:
         area = p.main_area.key if p.main_area else "BPA"
-        out: list[ActionItem] = []
         by_cnes: dict[tuple[str, str], list[OccurrenceRecord]] = {}
         for r in p.records:
             by_cnes.setdefault((r.cnes, r.cnes_name), []).append(r)
-        if not by_cnes:  # código sem linhas detalhadas
-            out.append(ActionItem(area, "", "", p.code, f"{p.title}: {p.group_meaning}"))
-            return out
-
+        if not by_cnes:  # código sem linhas detalhadas no relatório
+            first = p.steps[0].action_title if p.steps else p.group_meaning
+            return [ActionItem(area, "", "", p.code, p.title, [], "", p.description.capitalize() + ".", first + ".")]
+        out: list[ActionItem] = []
         for (cnes, name), recs in by_cnes.items():
-            texts = self._answer(p, recs)
-            out += [ActionItem(area, cnes, name, p.code, t) for t in texts]
+            for title, refs, label, problem, fix, notes in self._answer(p, recs):
+                out.append(ActionItem(area, cnes, name, p.code, title, refs, label, problem, fix, notes))
         return out
 
-    def _answer(self, p: ProblemExplanation, recs: list[OccurrenceRecord]) -> list[str]:
+    def _answer(self, p: ProblemExplanation, recs: list[OccurrenceRecord]):
+        """Gera (título, referências, rótulo, problema, como corrigir, observações) para cada coisa a fazer."""
         code = p.code
-        fichas = ", ".join(dict.fromkeys(r.reference for r in recs))
-        apacs = list(dict.fromkeys(r.reference for r in recs))
-        kind = "Ficha" if len(recs) == 1 else "Fichas"
+        refs = list(dict.fromkeys(r.reference for r in recs))
 
         if code == "FET2":
-            texts = []
             for proc in dict.fromkeys(r.procedure_code for r in recs):
-                refs = ", ".join(r.reference for r in recs if r.procedure_code == proc)
+                fichas = [r.reference for r in recs if r.procedure_code == proc]
                 rule = self.sigtap.find(proc)
                 if not rule:
-                    texts.append(f"Fichas {refs}: idade do paciente fora da faixa do procedimento {proc}. Confira a data de nascimento.")
+                    yield ("Idade fora da faixa do procedimento", fichas, "Ficha", f"Procedimento {proc}.",
+                           "Confira a data de nascimento no cadastro.", [])
                     continue
-                text = (f"Fichas {refs}: {rule.formatted_code} ({rule.name}) só aceita pacientes de {rule.age_range_display}. "
-                        "Confira a data de nascimento no cadastro")
-                if rule.code in AGE_ALTERNATIVES:
-                    alt = self.sigtap.find(AGE_ALTERNATIVES[rule.code][0])
-                    text += (f"; se estiver certa e o exame não for de rastreamento, lance como "
-                             f"{alt.formatted_code} ({alt.name})" if alt else "")
-                texts.append(text + ".")
-            return texts
+                fix = "Confira a data de nascimento no cadastro."
+                if rule.code in AGE_ALTERNATIVES and (alt := self.sigtap.find(AGE_ALTERNATIVES[rule.code][0])):
+                    fix += (f" Se estiver certa e o exame não for de rastreamento, lance como "
+                            f"{alt.formatted_code} ({alt.name}).")
+                yield ("Idade fora da faixa do procedimento", fichas, "Ficha",
+                       f"{rule.formatted_code} ({rule.name}) só aceita pacientes de {rule.age_range_display}.", fix, [])
+            return
         if code == "ERR8":
-            return [f"{kind} {fichas}: município de residência do paciente inválido. Corrigir o código IBGE do município "
-                    "(6 dígitos, ex.: 350320 = Araraquara) no cadastro do paciente e reenviar a remessa."]
+            yield ("Município de residência inválido", refs, "Ficha",
+                   "O código do município do paciente está errado ou não existe.",
+                   "Corrigir o código IBGE do município (6 dígitos, ex.: 350320 = Araraquara) no cadastro do paciente e "
+                   "reenviar a remessa.", [])
+            return
         if code == "ERRI":
-            return [f"{kind} {fichas}: raça/cor do paciente inválida. Informar 01 Branca, 02 Preta, 03 Parda, 04 Amarela "
-                    "ou 05 Indígena (a 05 exige o código da etnia)."]
+            yield ("Raça/cor inválida", refs, "Ficha", "A raça/cor do paciente não é aceita.",
+                   "Informar 01 Branca, 02 Preta, 03 Parda, 04 Amarela ou 05 Indígena (a 05 exige o código da etnia).", [])
+            return
         if code == "ERRj":
-            return [f"{kind} {fichas}: CPF do paciente com dígito verificador errado. Corrigir o CPF no cadastro "
-                    "(ou informar o CNS válido do paciente)."]
+            yield ("CPF do paciente inválido", refs, "Ficha", "O CPF tem dígito verificador errado.",
+                   "Corrigir o CPF no cadastro (ou informar o CNS válido do paciente).", [])
+            return
         if code == "ERRo":
-            return [self._answer_secondary(n, [r for r in recs if r.reference == n]) for n in apacs]
+            for apac in refs:
+                yield self._answer_secondary(apac, [r for r in recs if r.reference == apac])
+            return
         if code == "QTD2":
-            texts = []
             for r in recs:
                 rule = self.sigtap.find(r.procedure_code)
-                limit = f"o máximo permitido no SIGTAP é {rule.max_quantity}" if rule and rule.max_quantity else "passou do máximo"
-                texts.append(f"APAC {r.reference} (comp. {r.competencia}): {self._proc(r.procedure_code)} — {limit}. "
-                             "Corrigir a quantidade lançada (ou remover a linha repetida).")
-            return texts
+                limit = (f"O máximo permitido no SIGTAP é {rule.max_quantity}." if rule and rule.max_quantity
+                         else "Passou da quantidade máxima do procedimento.")
+                yield ("Quantidade acima do máximo", [r.reference], "APAC",
+                       f"{self._proc(r.procedure_code)} (competência {r.competencia}). {limit}",
+                       "Corrigir a quantidade lançada (ou remover a linha repetida).", [])
+            return
         if code == "9Q":
-            texts = []
             for r in recs:
                 rule = self.sigtap.find(r.procedure_code)
                 cids = f" CIDs aceitos pelo SIGTAP: {_join(rule.allowed_cids, 12)}." if rule and rule.allowed_cids else ""
-                texts.append(f"APAC {r.reference}: o CID informado não é aceito para {self._proc(r.procedure_code)}.{cids} "
-                             "Trocar pelo CID correto que estiver no laudo médico.")
-            return texts
+                yield ("CID não aceito para o procedimento", [r.reference], "APAC",
+                       f"O CID informado não é aceito para {self._proc(r.procedure_code)}.",
+                       f"Trocar pelo CID correto que estiver no laudo médico.{cids}", [])
+            return
         if code == "Y8":
-            texts = []
             for r in recs:
                 rule = self.sigtap.find(r.procedure_code)
                 fixed = any("2 competências" in d for d in self.sigtap.detail_text(rule)) if rule else True
-                rule_txt = "o SIGTAP define validade fixa de 2 competências para esta APAC" if fixed else \
-                    "a APAC tem validade de 2 competências"
-                texts.append(f"APAC {r.reference} (comp. {r.competencia}, {self._proc(r.procedure_code)}): {rule_txt} e ela "
-                             "foi apresentada fora desse prazo. Não dá para cobrar nesta APAC; se o cuidado continua, "
-                             "é preciso emitir uma APAC nova.")
-            return texts
+                rule_txt = ("O SIGTAP define validade fixa de 2 competências para esta APAC" if fixed
+                            else "A APAC tem validade de 2 competências")
+                yield ("APAC apresentada fora da validade", [r.reference], "APAC",
+                       f"{rule_txt} ({self._proc(r.procedure_code)}), e ela foi apresentada na competência {r.competencia}.",
+                       "Não dá para cobrar nesta APAC. Se o cuidado continua, é preciso emitir uma APAC nova.", [])
+            return
         if code in ("67", "12"):
             fix = ("Encerrar a APAC anterior com motivo de saída por mudança de procedimento, na competência em que a nova "
                    "começou, e apresentar a nova como APAC inicial.")
-            texts = []
-            for r in recs if code == "12" else [recs]:
-                rows = [r] if code == "12" else r
-                conflicts = self._apac_conflicts(rows)
-                prefix = (f"APAC {r.reference}: apresentada como continuidade, mas na competência anterior não houve "
-                          "permanência no mesmo procedimento. ") if code == "12" else ""
-                for c in conflicts or [""]:
-                    c = c.replace(" Como o procedimento mudou, a anterior precisa estar encerrada (mudança de procedimento) "
-                                  "antes do início da nova, e a nova entra como APAC inicial.", "")
-                    texts.append(f"{prefix}{c} {fix}".strip())
-            return texts
-        # Sem regra específica: descrição do SIA + o primeiro passo da base de erros.
+            if code == "67":
+                for patient, apacs, overlap in self._conflict_facts(recs):
+                    yield ("Duas APACs do mesmo paciente ao mesmo tempo", [a.apac_number for a in apacs], "APAC",
+                           f"Paciente {_mask(patient)}: " + " e ".join(self._apac_short(a) for a in apacs) + "." +
+                           (f" Elas se sobrepõem de {overlap}." if overlap else ""), fix, [])
+            else:
+                for r in recs:
+                    facts = self._conflict_facts([r])
+                    notes = [f"Paciente {_mask(pt)}: " + " e ".join(self._apac_short(a) for a in ap) + "."
+                             for pt, ap, _ in facts]
+                    yield ("Continuidade sem permanência na competência anterior", [r.reference], "APAC",
+                           "Foi apresentada como continuidade, mas na competência anterior não houve permanência no mesmo "
+                           "procedimento.", fix, notes)
+            return
         first = p.steps[0].action_title if p.steps else p.group_meaning
-        refs = ", ".join(apacs)
-        return [f"{refs}: {p.description.capitalize()}. {first}."]
+        label = "APAC" if recs and recs[0].instrument == "APAC" else "Ficha"
+        yield (p.title, refs, label, p.description.capitalize() + ".", first + ".", [])
 
-    def _answer_secondary(self, apac: str, recs: list[OccurrenceRecord]) -> str:
+    def _apac_short(self, a: RelatedApac) -> str:
+        rule = self.sigtap.find(a.procedure_code)
+        name = rule.name if rule else a.procedure_code
+        end = a.exit_date or a.end
+        exit_ = f", saída {_fmt(a.exit_date)}" if a.exit_date else ""
+        return f"APAC {a.apac_number} ({name}, {_fmt(a.start)} a {_fmt(a.end)}{exit_})" if end else f"APAC {a.apac_number} ({name})"
+
+    def _conflict_facts(self, records: list[OccurrenceRecord]):
+        """Para cada paciente: as APACs relacionadas (em ordem) e o período em que se sobrepõem."""
+        seen = set()
+        for r in records:
+            if not r.related_apacs or r.related_apacs[0].patient_document in seen:
+                continue
+            patient = r.related_apacs[0].patient_document
+            seen.add(patient)
+            apacs = sorted({a.apac_number: a for a in r.related_apacs}.values(), key=lambda a: a.start or date.min)
+            overlap = ""
+            if len(apacs) >= 2:
+                end_a = apacs[0].exit_date or apacs[0].end
+                if end_a and apacs[1].start and apacs[1].start <= end_a:
+                    overlap = f"{_fmt(apacs[1].start)} a {_fmt(end_a)}"
+            yield patient, apacs, overlap
+
+    def _answer_secondary(self, apac: str, recs: list[OccurrenceRecord]):
         principal = recs[0].procedure_code if recs else ""
         obligatory = self._obligatory(principal)
         names = "; ".join(f"{self._proc(c)} (qtd. {q})" for c, q in obligatory)
+        title = "Falta procedimento secundário obrigatório"
         mirror = self.mirrors.get(apac)
         if mirror and obligatory:
             launched = {i.procedure_code for i in mirror.items}
@@ -572,16 +627,17 @@ class ConsistencySolver:
             done = "; ".join(self._proc(i.procedure_code) for i in mirror.items if i.procedure_code[:9] != principal[:9])
             if missing:
                 miss = "; ".join(f"{self._proc(c)} (qtd. {q})" for c, q in missing)
-                return (f"APAC {apac} ({self._proc(principal)}): FALTA lançar o secundário obrigatório {miss}. "
-                        f"Já lançados: {done or 'nenhum'}. Incluir na APAC e reapresentar "
-                        "(se não foi realizado, a OCI não está completa).")
-            return (f"APAC {apac} ({self._proc(principal)}): todos os obrigatórios ({names}) estão lançados no espelho — "
-                    "confira a quantidade e o CBO de cada um.")
+                return (title, [apac], "APAC", f"{self._proc(principal)} exige os obrigatórios {names}.",
+                        f"FALTA lançar o secundário obrigatório {miss}. Incluir na APAC e reapresentar "
+                        "(se não foi realizado, a OCI não está completa).",
+                        [f"Já lançados: {done or 'nenhum'}."])
+            return (title, [apac], "APAC", f"{self._proc(principal)} exige os obrigatórios {names}.",
+                    "Todos os obrigatórios estão lançados no espelho: confira a quantidade e o CBO de cada um.", [])
         if obligatory:
-            return (f"APAC {apac} ({self._proc(principal)}): o SIGTAP exige os secundários obrigatórios {names}. "
-                    "Confira no espelho da APAC e inclua os que faltarem.")
-        return (f"APAC {apac} ({self._proc(principal)}): falta procedimento secundário obrigatório. "
-                "Confira as compatibilidades obrigatórias do procedimento no SIGTAP e inclua na APAC.")
+            return (title, [apac], "APAC", f"{self._proc(principal)}: o SIGTAP exige os secundários obrigatórios {names}.",
+                    "Conferir no espelho da APAC (R0330T) e incluir os que faltarem.", [])
+        return (title, [apac], "APAC", f"{self._proc(principal)}: falta procedimento secundário obrigatório.",
+                "Conferir as compatibilidades obrigatórias do procedimento no SIGTAP e incluir na APAC.", [])
 
     def _owners(self, problems: list[ProblemExplanation], report: ConsistencyReport) -> list[OwnerGroup]:
         groups: dict[tuple[str, str], OwnerGroup] = {}
@@ -592,23 +648,27 @@ class ConsistencySolver:
                     info = self.kb.areas.get(a.area_key)
                     groups[key] = OwnerGroup(a.area_key, info.label if info else a.area_key, info.who if info else "",
                                              a.cnes, a.cnes_name, [], "")
-                groups[key].items.append(a)
+                g = groups[key]
+                # Mesmo erro, mesmo problema e mesma correção em várias fichas/APACs: vira um item só.
+                twin = next((i for i in g.items if (i.code, i.title, i.problem, i.fix, tuple(i.notes)) ==
+                             (a.code, a.title, a.problem, a.fix, tuple(a.notes))), None)
+                if twin:
+                    twin.refs += [r for r in a.refs if r not in twin.refs]
+                else:
+                    g.items.append(ActionItem(a.area_key, a.cnes, a.cnes_name, a.code, a.title, list(a.refs), a.ref_label,
+                                              a.problem, a.fix, list(a.notes)))
         order = {"BPA": 0, "APAC": 1, "CNES": 2, "FPO": 3, "SIA": 4}
         result = sorted(groups.values(), key=lambda g: (order.get(g.area_key, 9), g.cnes_name))
         for g in result:
             lines = [f"Olá! Na consistência do SIA da competência {report.competencia}, a produção do "
-                     f"{g.cnes_name or 'estabelecimento'} (CNES {g.cnes}) teve estes problemas:", ""]
-            lines += [f"{n}. {i.text}" for n, i in enumerate(g.items, start=1)]
+                     f"{g.cnes_name or 'estabelecimento'} (CNES {g.cnes}) teve estes problemas:"]
+            for n, i in enumerate(g.items, start=1):
+                lines += ["", f"{n}) {i.title}" + (f" — {i.where}" if i.where else ""),
+                          f"   Problema: {i.problem}", f"   Como corrigir: {i.fix}"]
+                lines += [f"   Obs.: {x}" for x in i.notes]
             lines += ["", "Por favor, corrijam no sistema de origem e reenviem a remessa. Qualquer dúvida, falem com o CPD."]
             g.message = "\n".join(lines)
         return result
-
-    @staticmethod
-    def _totals_from_records(report: ConsistencyReport) -> list[OccurrenceTotal]:
-        counts: dict[tuple, int] = {}
-        for r in report.records:
-            counts[(r.group, r.code, r.description)] = counts.get((r.group, r.code, r.description), 0) + 1
-        return [OccurrenceTotal(g, c, n, d) for (g, c, d), n in counts.items()]
 
     # ------------------------------------------------------------ onde resolver
     def _areas(self, entry: KnowledgeEntry | None, total: OccurrenceTotal, records: list[OccurrenceRecord]) -> list[ResolvedArea]:

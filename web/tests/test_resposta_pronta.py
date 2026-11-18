@@ -64,7 +64,7 @@ def test_lista_por_responsavel_com_mensagem_pronta():
 def test_respostas_usam_a_tabela_oficial():
     acts = {a.code: a.text for p in solve(with_mirror=True).problems for a in p.actions}
     assert "CIDs aceitos pelo SIGTAP: C53, D06, N87, N88" in acts["9Q"]
-    assert "o máximo permitido no SIGTAP é 1" in acts["QTD2"]
+    assert "O máximo permitido no SIGTAP é 1" in acts["QTD2"]
     assert "validade fixa de 2 competências" in acts["Y8"]
     assert "25a até 64a 11m" in acts["FET2"] and "02.03.01.001-9" in acts["FET2"]
 

@@ -53,6 +53,21 @@ CSS = """
   .ft-brand-name { font-weight: 750; font-size: 1.1rem; line-height: 1.1; }
   .ft-brand-sub { font-size: .78rem; opacity: .65; }
   .ft-group { border-left: 4px solid rgba(239,68,68,.8); }
+  .ft-num { width: 24px; height: 24px; border-radius: 50%; background: rgba(127,127,127,.18); display: inline-flex;
+            align-items: center; justify-content: center; font-weight: 700; font-size: .8rem; }
+  .ft-item-title { font-weight: 700; font-size: 1.02rem; }
+  .ft-field { display: grid; grid-template-columns: 110px 1fr; gap: 10px; margin-top: 10px; line-height: 1.5; }
+  .ft-fix { display: grid; grid-template-columns: 110px 1fr; gap: 10px; margin-top: 10px; padding: 10px 12px;
+            border-radius: 10px; background: rgba(20,184,166,.12); border: 1px solid rgba(20,184,166,.35); line-height: 1.5; }
+  .ft-label { font-size: .72rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; opacity: .65; padding-top: 3px; }
+  .ft-fix .ft-label { opacity: .9; }
+  .ft-chip { display: inline-block; margin: 0 6px 4px 0; padding: 1px 9px; border-radius: 6px; font-size: .85rem;
+             font-family: ui-monospace, Consolas, monospace; background: rgba(127,127,127,.14); border: 1px solid rgba(127,127,127,.3); }
+  .ft-note { margin-top: 8px; font-size: .88rem; opacity: .75; padding-left: 120px; }
+  @media (max-width: 640px) {
+    .ft-field, .ft-fix { grid-template-columns: 1fr; gap: 2px; }
+    .ft-note { padding-left: 0; }
+  }
 </style>
 """
 

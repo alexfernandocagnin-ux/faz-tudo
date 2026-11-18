@@ -37,7 +37,7 @@ from faztudo.consistency import (COMPAT_OBRIGATORIA, ConsistencySolver, decode_r
                                  looks_like_apac_mirror,
                                  looks_like_consistency_report, parse_apac_mirror, parse_report)
 from faztudo.knowledge import load_knowledge  # noqa: E402
-from faztudo.sigtap import SigtapRepository  # noqa: E402
+from faztudo.sigtap import SigtapRepository, title_pt  # noqa: E402
 from faztudo.sigtap_store import SigtapStore  # noqa: E402
 from faztudo.text import format_brl  # noqa: E402
 from ui import (GROUP_CLASS, SEVERITY_CLASS, alt_area_html, area_html, badge, bullet_list, e, html,  # noqa: E402
@@ -151,35 +151,66 @@ def page_solver() -> None:
     report = parse_report(text, name)
     result = ConsistencySolver(sigtap(), KB).solve(report, mirrors)
 
+    # ---------- Resumo ----------
     meta = " · ".join(x for x in [report.source_name, report.orgao, f"competência {report.competencia}",
                                    f"tabela SIGTAP {sigtap().competencia_display}" if sigtap().is_official else "",
-                                   f"{len(mirrors)} APAC(s) no espelho" if mirrors else ""] if x)
-    html(f'<div class="ft-card"><div class="ft-meta">{e(meta)}</div>'
-         f'<div class="ft-headline">{e(result.headline)}</div></div>')
+                                   f"espelho com {len(mirrors)} APAC(s)" if mirrors else ""] if x)
+    st.caption(meta)
+    m = st.columns(4)
+    m[0].metric("Ocorrências", result.total_occurrences, border=True)
+    m[1].metric("Estabelecimentos", result.establishment_count, border=True)
+    m[2].metric("Tipos de erro", len(result.problems), border=True)
+    blocking = sum(p.quantity for p in result.problems if p.is_blocking)
+    m[3].metric("Impedem aprovação", blocking, border=True)
     for note in result.notes[:-1]:
         st.info(note, icon=":material/info:")
 
-    # ---------- 1. O que fazer, por responsável ----------
-    st.subheader("O que fazer")
-    for gi, g in enumerate(result.owners):
+    # ---------- Uma aba por responsável + detalhes ----------
+    def tab_label(g) -> str:
+        name = title_pt(g.cnes_name) if g.cnes_name else "Outros"
+        return f"{name[:30] + ('…' if len(name) > 30 else '')} ({len(g.items)})"
+
+    labels = [tab_label(g) for g in result.owners]
+    tabs = st.tabs(labels + ["Detalhes técnicos"])
+    for tab, g in zip(tabs, result.owners):
+        with tab:
+            owner_panel(g)
+    with tabs[-1]:
+        technical_details(result, name)
+
+
+def owner_panel(g) -> None:
+    """Tudo o que um estabelecimento precisa corrigir: cabeçalho, mensagem pronta e um cartão por erro."""
+    if not g.cnes:
+        st.caption("Estes códigos aparecem no quadro de totais do relatório, mas o SIA não listou em qual estabelecimento. "
+                   "Confira no SIA (relatório completo da consistência) a quem pertencem.")
+    head, action = st.columns([3, 1.2], vertical_alignment="center")
+    with head:
+        where = f"CNES {g.cnes}" if g.cnes else ""
+        html(f'<div class="ft-row"><div class="ft-area-key" style="width:46px;height:46px;font-size:.8rem">{e(g.area_key)}</div>'
+             f'<div><div class="ft-section" style="margin:0">{e(OWNER_TITLE.get(g.area_key, g.area_label))}</div>'
+             f'<div style="font-weight:700;font-size:1.05rem">{e(g.cnes_name or g.area_label)}</div>'
+             f'<div class="ft-meta">{e(where)} · {e(g.who)}</div></div></div>')
+    with action:
+        with st.popover("Mensagem pronta", icon=":material/send:", width="stretch"):
+            st.caption("Copie (botão no canto do quadro) e mande por e-mail ou WhatsApp.")
+            st.code(g.message, language=None, wrap_lines=True)
+
+    for i, item in enumerate(g.items, start=1):
         with st.container(border=True):
-            where = f"{g.cnes_name} · CNES {g.cnes}" if g.cnes else ""
-            html(f'<div class="ft-row"><div class="ft-area-key" style="width:52px;height:52px">{e(g.area_key)}</div><div>'
-                 f'<div class="ft-section" style="margin:0">{e(OWNER_TITLE.get(g.area_key, g.area_label))}</div>'
-                 f'<div class="ft-title" style="margin:2px 0 0 0;font-size:1.12rem">{e(where or g.area_label)}</div>'
-                 f'<div class="ft-meta">{e(g.who)}</div></div></div>')
-            items = "".join(f'<li>{badge(i.code, "ft-red")} &nbsp;{e(i.text)}</li>' for i in g.items)
-            html(f'<ol class="ft-list" style="margin-top:12px">{items}</ol>')
-            with st.expander("Mensagem pronta para mandar", icon=":material/send:"):
-                st.code(g.message, language=None, wrap_lines=True)
+            chips = "".join(f'<span class="ft-chip">{e(r)}</span>' for r in item.refs)
+            html(f'<div class="ft-row"><span class="ft-num">{i}</span>{badge(item.code, "ft-red")}'
+                 f'<span class="ft-item-title">{e(item.title)}</span></div>'
+                 + (f'<div class="ft-field"><span class="ft-label">Onde</span><div>{chips}</div></div>' if chips else "")
+                 + f'<div class="ft-field"><span class="ft-label">Problema</span><div>{e(item.problem)}</div></div>'
+                 f'<div class="ft-fix"><span class="ft-label">Como corrigir</span><div>{e(item.fix)}</div></div>'
+                 + "".join(f'<div class="ft-note">{e(n)}</div>' for n in item.notes))
 
-    text_all = result.to_plain_text()
-    st.download_button("Baixar tudo (.txt)", text_all, file_name=f"resposta-{Path(name).stem}.txt",
+
+def technical_details(result, name: str) -> None:
+    st.caption("Explicação completa de cada código de erro, para quem quer entender o porquê.")
+    st.download_button("Baixar tudo em texto (.txt)", result.to_plain_text(), file_name=f"resposta-{Path(name).stem}.txt",
                        icon=":material/download:")
-
-    # ---------- 2. Detalhes ----------
-    st.subheader("Detalhes de cada erro")
-    st.caption("Para quem quer entender o porquê. Para corrigir, a lista acima já basta.")
     for i, p in enumerate(result.problems):
         with st.expander(f"**{p.code}** — {p.title} · {p.quantity_display}"):
             html(f'<div class="ft-meta">{e(p.group_meaning)}</div><div class="ft-sia">No SIA: {e(p.description)}</div>')
