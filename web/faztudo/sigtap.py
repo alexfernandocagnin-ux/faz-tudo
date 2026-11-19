@@ -36,7 +36,14 @@ DEFAULT_LAYOUTS: dict[str, list[tuple[str, int]]] = {
     "tb_regra_condicionada": [("CO_REGRA_CONDICIONADA", 4), ("NO_REGRA_CONDICIONADA", 150), ("DS_REGRA_CONDICIONADA", 4000)],
     "rl_procedimento_detalhe": [("CO_PROCEDIMENTO", 10), ("CO_DETALHE", 3), ("DT_COMPETENCIA", 6)],
     "tb_detalhe": [("CO_DETALHE", 3), ("NO_DETALHE", 100), ("DT_COMPETENCIA", 6)],
+    "rl_procedimento_servico": [("CO_PROCEDIMENTO", 10), ("CO_SERVICO", 3), ("CO_CLASSIFICACAO", 3), ("DT_COMPETENCIA", 6)],
+    "tb_servico": [("CO_SERVICO", 3), ("NO_SERVICO", 120), ("DT_COMPETENCIA", 6)],
+    "tb_servico_classificacao": [("CO_SERVICO", 3), ("CO_CLASSIFICACAO", 3), ("NO_CLASSIFICACAO", 150), ("DT_COMPETENCIA", 6)],
 }
+
+# Versão do pacote .json.gz. Suba quando o pacote ganhar dados novos: tabelas baixadas num formato antigo
+# são descartadas e baixadas de novo (2 = serviço/classificação exigido por procedimento).
+BUNDLE_FORMAT = 2
 
 REGISTRO = {"01": "BPA-C", "02": "BPA-I", "03": "AIH", "04": "AIH", "05": "AIH", "06": "APAC", "07": "APAC",
             "08": "RAAS", "09": "RAAS", "10": "e-SUS APS"}
@@ -74,6 +81,8 @@ class SigtapRule:
     compatibles: list[list] = field(default_factory=list)
     conditioned_rules: list[str] = field(default_factory=list)   # códigos de tb_regra_condicionada
     details: list[str] = field(default_factory=list)             # códigos de tb_detalhe
+    # Serviço/classificação que o estabelecimento precisa ter (rl_procedimento_servico): "SSSCCC", ex. "121003"
+    services: list[str] = field(default_factory=list)
 
     @property
     def formatted_code(self) -> str:
@@ -173,6 +182,8 @@ class SigtapRepository:
         self.version = version
         self.rule_names: dict[str, tuple[str, str]] = {}  # regra condicionada → (nome, descrição)
         self.detail_names: dict[str, str] = {}            # detalhe → nome
+        self.service_names: dict[str, str] = {}           # "121" → nome do serviço
+        self.class_names: dict[str, str] = {}             # "121003" → nome da classificação
 
     @property
     def competencia_display(self) -> str:
@@ -221,7 +232,7 @@ class SigtapRepository:
         for info in archive.infolist():
             name = Path(info.filename).name.lower()
             if name.endswith(".txt") and (name.startswith(("tb_procedimento", "rl_procedimento_", "tb_regra_condicionada",
-                                                           "tb_detalhe"))):
+                                                           "tb_detalhe", "tb_servico"))):
                 files[name] = archive.read(info)
         return SigtapRepository.from_files(files)
 
@@ -250,6 +261,15 @@ class SigtapRepository:
 
         rule_codes = relation("rl_procedimento_regra_cond", "CO_REGRA_CONDICIONADA")
         detail_codes = relation("rl_procedimento_detalhe", "CO_DETALHE")
+
+        services: dict[str, list[str]] = {}
+        if files.get("rl_procedimento_servico.txt"):
+            serv_layout = _Layout.load(files, "rl_procedimento_servico")
+            for line in files["rl_procedimento_servico.txt"].decode("latin-1").splitlines():
+                proc = serv_layout.read(line, "CO_PROCEDIMENTO")
+                sc = serv_layout.read(line, "CO_SERVICO") + serv_layout.read(line, "CO_CLASSIFICACAO")
+                if len(proc) == 10 and len(sc) == 6 and sc not in services.setdefault(proc, []):
+                    services[proc].append(sc)
 
         compatibles: dict[str, list[list]] = {}
         if files.get("rl_procedimento_compativel.txt"):
@@ -313,6 +333,7 @@ class SigtapRepository:
                 compatibles=compatibles.get(code, []),
                 conditioned_rules=sorted(rule_codes.get(code, set())),
                 details=sorted(detail_codes.get(code, set())),
+                services=sorted(services.get(code, [])),
             )
 
         if not procedures:
@@ -323,7 +344,20 @@ class SigtapRepository:
                            for k, v in names("tb_regra_condicionada", "CO_REGRA_CONDICIONADA", "NO_REGRA_CONDICIONADA",
                                              "DS_REGRA_CONDICIONADA").items()}
         repo.detail_names = names("tb_detalhe", "CO_DETALHE", "NO_DETALHE")
+        repo.service_names = {k: title_pt(v) for k, v in names("tb_servico", "CO_SERVICO", "NO_SERVICO").items()}
+        if files.get("tb_servico_classificacao.txt"):
+            lay = _Layout.load(files, "tb_servico_classificacao")
+            for line in files["tb_servico_classificacao.txt"].decode("latin-1").splitlines():
+                sc = lay.read(line, "CO_SERVICO") + lay.read(line, "CO_CLASSIFICACAO")
+                if len(sc) == 6:
+                    repo.class_names[sc] = title_pt(lay.read(line, "NO_CLASSIFICACAO"))
         return repo
+
+    def service_text(self, sc: str) -> str:
+        """'121/003 Serviço de Diagnóstico por Imagem – Mamografia' (ou só o código, se não tiver o nome)."""
+        serv, cls = self.service_names.get(sc[:3], ""), self.class_names.get(sc, "")
+        name = " – ".join(x for x in (serv, cls) if x)
+        return f"{sc[:3]}/{sc[3:]}" + (f" {name}" if name else "")
 
     def detail_text(self, rule: SigtapRule) -> list[str]:
         return [self.detail_names[d] for d in rule.details if d in self.detail_names]
@@ -334,13 +368,22 @@ class SigtapRepository:
     # ------------------------------------------------------------ pacote pronto (json.gz, carrega em segundos)
     def to_bundle(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"label": self.label, "competencia": self.competencia, "version": self.version,
+        payload = {"format": BUNDLE_FORMAT, "label": self.label, "competencia": self.competencia, "version": self.version,
                    "rule_names": self.rule_names, "detail_names": self.detail_names,
+                   "service_names": self.service_names, "class_names": self.class_names,
                    "procedures": [p.to_json() for p in self.procedures.values()]}
         temp = path.with_suffix(path.suffix + ".tmp")
         with gzip.open(temp, "wt", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False)
         temp.replace(path)
+
+    @staticmethod
+    def bundle_format(path: Path) -> int:
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                return int(json.load(fh).get("format", 1))
+        except (OSError, ValueError):
+            return 0
 
     @staticmethod
     def from_bundle(path: Path) -> "SigtapRepository":
@@ -351,6 +394,8 @@ class SigtapRepository:
                                 version=payload.get("version", ""))
         repo.rule_names = {k: tuple(v) for k, v in payload.get("rule_names", {}).items()}
         repo.detail_names = payload.get("detail_names", {})
+        repo.service_names = payload.get("service_names", {})
+        repo.class_names = payload.get("class_names", {})
         return repo
 
 

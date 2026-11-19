@@ -88,3 +88,44 @@ def test_relatorio_recortado_sem_quadro_de_totais_nao_quebra():
     report.totals = []
     result = ConsistencySolver(official(), load_knowledge()).solve(report)
     assert sum(p.quantity for p in result.problems) == len(report.records)
+
+
+def test_prazo_de_reapresentacao_pela_portaria_1110():
+    from faztudo.consistency import ActionItem, OccurrenceRecord
+    def rec(comp, inst):
+        return OccurrenceRecord("1", "x", inst, comp, "1", "0301010072", "", "", "", "X", "NOR", 1)
+    assert ConsistencySolver._deadline([rec("09/2026", "BPAI")]) == 2026 * 12 + 12        # 09 + 3 → 12/2026
+    assert ConsistencySolver._deadline([rec("09/2026", "APAC")]) == 2027 * 12 + 2         # 09 + 5 → 02/2027
+    item = ActionItem("BPA", "1", "x", "X", "t", [], "", "p", "f", [], 2026 * 12 + 8, 2026 * 12 + 10)
+    assert item.deadline_expired and item.deadline_display == "vencido (era até 08/2026)"
+
+
+def test_respostas_para_erros_de_profissional_e_procedimento():
+    report = parse_report(decode_report((FIX / "R0350-exemplo.OUT").read_bytes()), "R0350.OUT")
+    base = report.records[0]
+    from dataclasses import replace
+    report.totals = []
+    report.records = [replace(base, code="ATI4", cbo="322205", procedure_code="0204030153", description="CBO NAO PERMITIDO"),
+                      replace(base, code="ERRT", description="PROF.COM MAIS 2 VINC.PUBLICO")]
+    result = ConsistencySolver(official(), load_knowledge()).solve(report)
+    acts = {a.code: a for p in result.problems for a in p.actions}
+    assert "CBOs aceitos:" in acts["ATI4"].fix and "322205" in acts["ATI4"].problem
+    assert "168 h" in acts["ERRT"].problem
+    assert all("Problema na produção" not in a.fix for a in acts.values())
+
+
+def test_pam3_diz_o_servico_exigido_pelo_sigtap():
+    repo = official()
+    rule = repo.find("0701060042")
+    assert rule.services and repo.service_text(rule.services[0]).startswith("135/0")
+
+
+def test_historico_escolhe_o_mes_mais_novo():
+    from dataclasses import replace
+    from faztudo.consistency import pick_reports
+    base = parse_report(decode_report((FIX / "R0350-exemplo.OUT").read_bytes()), "R0350.OUT")
+    ago = replace(base, competencia="08/2026", generated_at="10/09/2026 10:00:00")
+    out = replace(base, competencia="10/2026", generated_at="10/11/2026 10:00:00")
+    out_velho = replace(base, competencia="10/2026", generated_at="01/11/2026 10:00:00")
+    main, history = pick_reports([out_velho, ago, out])
+    assert main is out and history == [ago]

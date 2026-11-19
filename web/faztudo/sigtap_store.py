@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import ROOT_DIR, SHARED_DIR
-from .sigtap import SigtapRepository
+from .sigtap import BUNDLE_FORMAT, SigtapRepository
 from .sigtap_remote import RemoteTable
 
 DEFAULT_DATA_DIR = Path(os.environ.get("CONSERTA_SIA_DATA", ROOT_DIR / "web" / ".data"))
@@ -42,6 +42,7 @@ class SigtapStore:
         self.project_dir = Path(project_dir)
         self._lock = threading.RLock()
         self._loaded: dict[str, SigtapRepository] = {}
+        self._formats: dict[tuple[str, float], bool] = {}
 
     # ------------------------------------------------------------ o que existe
     def tables(self) -> dict[str, StoredTable]:
@@ -51,8 +52,16 @@ class SigtapStore:
             for path in sorted(folder.glob("sigtap-*.json.gz")):
                 comp = path.name[len("sigtap-"):-len(".json.gz")]
                 if len(comp) == 6 and comp.isdigit():
+                    if not from_project and not self._current_format(path):
+                        continue  # baixada num formato antigo: é ignorada e o site baixa de novo
                     found[comp] = StoredTable(comp, self._version_of(path), path, from_project)
         return dict(sorted(found.items(), reverse=True))
+
+    def _current_format(self, path: Path) -> bool:
+        key = (str(path), path.stat().st_mtime)
+        if key not in self._formats:
+            self._formats[key] = SigtapRepository.bundle_format(path) >= BUNDLE_FORMAT
+        return self._formats[key]
 
     @staticmethod
     def _version_of(path: Path) -> str:

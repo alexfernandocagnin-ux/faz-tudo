@@ -320,6 +320,21 @@ class ActionItem:
     problem: str
     fix: str
     notes: list[str] = field(default_factory=list)
+    deadline: int = 0       # última competência aceita (ano*12 + mês); 0 = sem prazo calculado
+    processing: int = 0     # competência de processamento do relatório (mesma conta)
+
+    @property
+    def deadline_display(self) -> str:
+        """'até 01/2027' ou 'vencido (era até 08/2026)' — Portaria SAES/MS 1.110/2021, art. 3º."""
+        if not self.deadline:
+            return ""
+        y, m = divmod(self.deadline - 1, 12)
+        when = f"{m + 1:02d}/{y}"
+        return f"vencido (era até {when})" if self.deadline_expired else f"até {when}"
+
+    @property
+    def deadline_expired(self) -> bool:
+        return bool(self.deadline and self.processing and self.deadline < self.processing)
 
     @property
     def where(self) -> str:
@@ -436,6 +451,42 @@ def _plural(n: int, one: str, many: str) -> str:
     return f"1 {one}" if n == 1 else f"{n} {many}"
 
 
+def _comp_index(comp: str) -> int:
+    """'09/2026' → 2026*12 + 9 (para somar meses). 0 quando não dá para ler."""
+    m = re.fullmatch(r"\s*(\d{2})/(\d{4})\s*", comp or "")
+    return int(m.group(2)) * 12 + int(m.group(1)) if m and 1 <= int(m.group(1)) <= 12 else 0
+
+
+INSTRUMENT_NAME = {"BPAI": "BPA-I", "BPAC": "BPA-C", "APAC": "APAC"}
+
+# Erros sem regra para consultar: título, problema e como corrigir (curtos).
+SIMPLE_ANSWERS = {
+    "ERRT": ("Profissional acima do limite de vínculos ou horas",
+             "O profissional passou do limite: mais de 2 vínculos públicos ou mais de 168 h por semana somando tudo.",
+             "Ajustar os vínculos ou a carga horária do profissional no CNES."),
+    "ERR5": ("CNES não cadastrado", "O número do CNES lançado na produção não existe na base do SIA.",
+             "Conferir o número do CNES. Se estiver certo, importar no SIA o CNES atualizado da competência."),
+    "ERRL": ("CNS inválido ou faltando", "O CNS do paciente ou do profissional está errado ou em branco.",
+             "Informar o CNS certo (15 dígitos)."),
+    "ERRw": ("CNS do paciente inválido", "O CNS do paciente está errado.", "Informar o CNS certo do paciente (15 dígitos)."),
+    "ERRK": ("Endereço do paciente inválido", "O endereço do paciente está incompleto ou errado.",
+             "Completar o endereço no cadastro (logradouro, número e bairro)."),
+    "33": ("Logradouro em branco", "O logradouro do paciente não foi preenchido.", "Preencher o logradouro no cadastro."),
+    "ERRZ": ("CEP do paciente inválido", "O CEP do paciente está errado.", "Corrigir o CEP (8 dígitos, um CEP que exista)."),
+    "ERRG": ("Dados do paciente inválidos", "Nome, data de nascimento ou endereço do paciente estão errados.",
+             "Conferir nome, data de nascimento e endereço no cadastro."),
+    "ERRJ": ("Data do atendimento inválida", "A data do atendimento está errada.",
+             "Corrigir a data: precisa ser válida e dentro da competência lançada."),
+    "ERRR": ("Etnia inválida", "Raça/cor 05 (Indígena) exige a etnia, e ela está errada ou faltando.",
+             "Informar a etnia certa, ou corrigir a raça/cor."),
+    "PAMb": ("Serviço/classificação errado no atendimento",
+             "O serviço/classificação informado no atendimento está errado ou faltando.",
+             "Informar o serviço/classificação que o procedimento exige (Consultor SIGTAP)."),
+    "29": ("Paciente consta como falecido", "O CNS do paciente consta como falecido antes do atendimento.",
+           "Conferir se o CNS é mesmo deste paciente. Se for, o atendimento não pode ser cobrado."),
+}
+
+
 def _fmt(d: date | None) -> str:
     return d.strftime("%d/%m/%Y") if d else "?"
 
@@ -447,6 +498,7 @@ class ConsistencySolver:
 
     def solve(self, report: ConsistencyReport, mirrors: list[ApacMirror] | None = None) -> SolverResult:
         self.mirrors = {m.number: m for m in (mirrors or [])}
+        self.processing = _comp_index(report.competencia)
         totals = report.totals or self._totals_from_records(report)
         problems = []
         for t in totals:
@@ -512,13 +564,28 @@ class ConsistencySolver:
         for r in p.records:
             by_cnes.setdefault((r.cnes, r.cnes_name), []).append(r)
         if not by_cnes:  # código sem linhas detalhadas no relatório
+            if p.code in SIMPLE_ANSWERS:
+                title, problem, fix = SIMPLE_ANSWERS[p.code]
+                return [ActionItem(area, "", "", p.code, title, [], "", problem, fix)]
             first = p.steps[0].action_title if p.steps else p.group_meaning
             return [ActionItem(area, "", "", p.code, p.title, [], "", p.description.capitalize() + ".", first + ".")]
         out: list[ActionItem] = []
         for (cnes, name), recs in by_cnes.items():
             for title, refs, label, problem, fix, notes in self._answer(p, recs):
-                out.append(ActionItem(area, cnes, name, p.code, title, refs, label, problem, fix, notes))
+                mine = [r for r in recs if r.reference in refs] or recs
+                out.append(ActionItem(area, cnes, name, p.code, title, refs, label, problem, fix, notes,
+                                      self._deadline(mine), getattr(self, "processing", 0)))
         return out
+
+    @staticmethod
+    def _deadline(recs: list[OccurrenceRecord]) -> int:
+        """Até quando dá para apresentar de novo (Portaria SAES/MS 1.110/2021, art. 3º): atendimento é aceito até
+        3 competências depois do mês do atendimento (4 no total); APAC rejeitada, até 6 meses contando o do
+        atendimento. Vale o atendimento mais antigo do grupo."""
+        months = [(_comp_index(r.competencia), r.instrument) for r in recs if _comp_index(r.competencia)]
+        if not months:
+            return 0
+        return min(m + (5 if inst == "APAC" else 3) for m, inst in months)
 
     def _answer(self, p: ProblemExplanation, recs: list[OccurrenceRecord]):
         """Gera (título, referências, rótulo, problema, como corrigir, observações) para cada coisa a fazer."""
@@ -532,6 +599,12 @@ class ConsistencySolver:
                 if not rule:
                     yield ("Idade fora da faixa do procedimento", fichas, "Ficha", f"Procedimento {proc}.",
                            "Confira a data de nascimento no cadastro.", [])
+                    continue
+                if rule.min_age_months <= 0 and rule.max_age_months >= 1560:  # aceita qualquer idade
+                    yield ("Idade inválida", fichas, "Ficha",
+                           f"{rule.formatted_code} ({rule.name}) aceita qualquer idade, então a data de nascimento "
+                           "está errada (em branco ou depois do atendimento).",
+                           "Corrigir a data de nascimento no cadastro.", [])
                     continue
                 fix = "Confira a data de nascimento no cadastro."
                 if rule.code in AGE_ALTERNATIVES and (alt := self.sigtap.find(AGE_ALTERNATIVES[rule.code][0])):
@@ -602,9 +675,82 @@ class ConsistencySolver:
                            "Foi apresentada como continuidade, mas na competência anterior não houve permanência no mesmo "
                            "procedimento.", fix, notes)
             return
-        first = p.steps[0].action_title if p.steps else p.group_meaning
         label = "APAC" if recs and recs[0].instrument == "APAC" else "Ficha"
+        simple = SIMPLE_ANSWERS.get(code)
+        if simple:
+            yield (simple[0], refs, label, simple[1], simple[2], [])
+            return
+        if code in ("ERRC", "ATI1", "ATI4", "PAM3", "PAMb", "PAM2", "PAME", "ERRa"):
+            yield from self._answer_by_procedure(code, recs, label)
+            return
+        first = p.steps[0].action_title if p.steps else p.group_meaning
         yield (p.title, refs, label, p.description.capitalize() + ".", first + ".", [])
+
+    def _answer_by_procedure(self, code: str, recs: list[OccurrenceRecord], label: str):
+        """Erros de profissional/procedimento: agrupa por procedimento (ou CBO) e usa as regras do SIGTAP."""
+        def group(key):
+            out: dict = {}
+            for r in recs:
+                refs = out.setdefault(key(r), [])
+                if r.reference not in refs:
+                    refs.append(r.reference)
+            return out.items()
+
+        if code == "ERRC":
+            pros = len({r.third_column for r in recs if r.third_column})
+            who = f" ({pros} profissionais diferentes)" if pros > 1 else ""
+            yield ("Profissional não vinculado à unidade", list(dict.fromkeys(r.reference for r in recs)), label,
+                   f"O CNS do profissional lançado não está ligado a este estabelecimento (ou à equipe) na competência{who}.",
+                   "Conferir se o CNS do profissional foi digitado certo. Se estiver certo, o profissional precisa estar "
+                   "vinculado a esta unidade no CNES da competência.", [])
+        elif code == "ATI1":
+            for cbo, fichas in group(lambda r: r.cbo):
+                yield ("CBO que o profissional não tem", fichas, label,
+                       f"O profissional foi lançado com o CBO {cbo or '(vazio)'}, que não está no cadastro dele nesta unidade.",
+                       "Lançar com o CBO que ele tem no CNES, ou incluir esse CBO no cadastro dele.", [])
+        elif code == "ATI4":
+            for (proc, cbo), fichas in group(lambda r: (r.procedure_code, r.cbo)):
+                rule = self.sigtap.find(proc)
+                ok = [c for c in (rule.allowed_cbos if rule else []) if c != "*"]
+                fix = (f"Lançar no nome de um profissional com CBO aceito. CBOs aceitos: {_join(ok, 10)}." if ok
+                       else "Lançar no nome de um profissional com CBO aceito para o procedimento (Consultor SIGTAP).")
+                yield ("CBO não pode fazer este procedimento", fichas, label,
+                       f"O CBO {cbo} não é aceito para {self._proc(proc)}.", fix, [])
+        elif code in ("PAM3", "PAMb"):
+            for proc, fichas in group(lambda r: r.procedure_code):
+                rule = self.sigtap.find(proc)
+                serv = [self.sigtap.service_text(x) for x in (rule.services if rule else [])]
+                need = (serv[0] if len(serv) == 1 else "um destes: " + "; ".join(serv[:6])) if serv else ""
+                if code == "PAM3":
+                    yield ("Unidade sem o serviço que o procedimento exige", fichas, label,
+                           f"{self._proc(proc)} exige o serviço/classificação {need}." if need else
+                           f"{self._proc(proc)} exige um serviço/classificação que a unidade não tem.",
+                           "A unidade precisa ter esse serviço/classificação cadastrado. Se ela não faz esse serviço, "
+                           "o procedimento não pode ser lançado nela.", [])
+                else:
+                    yield ("Serviço/classificação errado no atendimento", fichas, label,
+                           f"O serviço/classificação informado para {self._proc(proc)} está errado ou faltando.",
+                           f"Informar {need}." if need else "Informar o serviço/classificação exigido pelo procedimento.", [])
+        elif code == "PAM2":
+            for proc, fichas in group(lambda r: r.procedure_code):
+                advice = self._fpo_advice([r for r in recs if r.procedure_code == proc])
+                yield ("Procedimento sem orçamento na FPO", fichas, label,
+                       f"{self._proc(proc)} não tem meta/valor na FPO desta unidade.",
+                       advice[0] if advice else "Incluir o procedimento na FPO da unidade e exportar a FPO para o SIA.", [])
+        elif code == "PAME":
+            for (proc, inst), fichas in group(lambda r: (r.procedure_code, r.instrument)):
+                rule = self.sigtap.find(proc)
+                where = ", ".join(rule.allowed_instruments) if rule else ""
+                yield ("Procedimento no instrumento errado", fichas, label,
+                       f"{self._proc(proc)} não pode ser cobrado em {INSTRUMENT_NAME.get(inst, inst)}.",
+                       f"Lançar no instrumento certo: {where}." if where else "Lançar no instrumento aceito pelo SIGTAP.", [])
+        elif code == "ERRa":
+            for proc, fichas in group(lambda r: r.procedure_code):
+                rule = self.sigtap.find(proc)
+                limit = f" O máximo no SIGTAP é {rule.max_quantity}." if rule and rule.max_quantity else ""
+                yield ("Quantidade acima do máximo por paciente", fichas, label,
+                       f"{self._proc(proc)} passou da quantidade permitida por paciente na competência.{limit}",
+                       "Corrigir a quantidade, ou tirar o lançamento repetido do mesmo paciente.", [])
 
     def _apac_short(self, a: RelatedApac) -> str:
         rule = self.sigtap.find(a.procedure_code)
@@ -687,9 +833,11 @@ class ConsistencySolver:
                              (a.code, a.title, a.problem, a.fix, tuple(a.notes))), None)
                 if twin:
                     twin.refs += [r for r in a.refs if r not in twin.refs]
+                    if a.deadline and (not twin.deadline or a.deadline < twin.deadline):
+                        twin.deadline = a.deadline
                 else:
                     g.items.append(ActionItem(a.area_key, a.cnes, a.cnes_name, a.code, a.title, list(a.refs), a.ref_label,
-                                              a.problem, a.fix, list(a.notes)))
+                                              a.problem, a.fix, list(a.notes), a.deadline, a.processing))
         order = {"BPA": 0, "APAC": 1, "CNES": 2, "FPO": 3, "SIA": 4}
         result = sorted(groups.values(), key=lambda g: (order.get(g.area_key, 9), g.cnes_name))
         for g in result:
@@ -698,6 +846,8 @@ class ConsistencySolver:
             for n, i in enumerate(g.items, start=1):
                 lines += ["", f"{n}) {i.title}" + (f" — {i.where}" if i.where else ""),
                           f"   Problema: {i.problem}", f"   Como corrigir: {i.fix}"]
+                if i.deadline_display:
+                    lines.append(f"   Prazo para reapresentar: {i.deadline_display}")
                 lines += [f"   Obs.: {x}" for x in i.notes]
             lines += ["", "Por favor, corrijam no sistema de origem e reenviem a remessa. Qualquer dúvida, falem com o CPD."]
             g.message = "\n".join(lines)
@@ -851,3 +1001,41 @@ class ConsistencySolver:
                              "início da nova, e a nova entra como APAC inicial.")
             out.append(text)
         return out
+
+
+# ====================================================================== histórico (vários R0350 juntos)
+
+def _generated_key(report: ConsistencyReport) -> str:
+    m = re.match(r"(\d{2})/(\d{2})/(\d{4})\s*(\S*)", report.generated_at or "")
+    return f"{m.group(3)}{m.group(2)}{m.group(1)}{m.group(4)}" if m else ""
+
+
+def pick_reports(reports: list[ConsistencyReport]) -> tuple[ConsistencyReport, list[ConsistencyReport]]:
+    """O relatório da competência mais nova é o principal; os outros viram histórico (um por competência,
+    o gerado por último)."""
+    latest: dict[str, ConsistencyReport] = {}
+    for r in reports:
+        old = latest.get(r.competencia)
+        if old is None or _generated_key(r) >= _generated_key(old):
+            latest[r.competencia] = r
+    ordered = sorted(latest.values(), key=lambda r: (_comp_index(r.competencia), _generated_key(r)))
+    return ordered[-1], ordered[:-1]
+
+
+def occurrence_keys(report: ConsistencyReport) -> set[tuple[str, str]]:
+    """(código, CNES) de tudo o que apareceu no relatório; código sem detalhe entra com CNES vazio."""
+    keys = {(r.code, r.cnes) for r in report.records}
+    keys |= {(t.code, "") for t in report.totals}
+    return keys
+
+
+def code_quantities(report: ConsistencyReport) -> dict[str, int]:
+    if report.totals:
+        out: dict[str, int] = {}
+        for t in report.totals:
+            out[t.code] = out.get(t.code, 0) + t.quantity
+        return out
+    out = {}
+    for r in report.records:
+        out[r.code] = out.get(r.code, 0) + 1
+    return out

@@ -36,7 +36,8 @@ from faztudo import sigtap_remote  # noqa: E402
 from faztudo.bpa import analyze, findings_to_csv, parse_bpa  # noqa: E402
 from faztudo.consistency import (COMPAT_OBRIGATORIA, ConsistencySolver, decode_report,  # noqa: E402
                                  looks_like_apac_mirror,
-                                 looks_like_consistency_report, parse_apac_mirror, parse_report)
+                                 looks_like_consistency_report, parse_apac_mirror, parse_report,
+                                 code_quantities, occurrence_keys, pick_reports)
 from faztudo.knowledge import load_knowledge  # noqa: E402
 from faztudo.sigtap import SigtapRepository, title_pt  # noqa: E402
 from faztudo.sigtap_store import SigtapStore  # noqa: E402
@@ -147,12 +148,19 @@ def page_solver() -> None:
                  "(R0330T.OUT ou os arquivos \"<nº da APAC> apac.<mês>\"): pode selecionar todos de uma vez.",
                  "Você recebe a lista do que fazer separada por estabelecimento, já com o motivo e a correção.",
                  "Cada estabelecimento tem uma mensagem pronta: é só copiar e mandar no e-mail ou WhatsApp.",
+                 "Quer comparar? Selecione junto os R0350 dos meses anteriores (R0350.AGO, R0350.SET…): eu marco o que "
+                 "é novo e o que se repete.",
              ]) + '</div>')
         return
 
-    name, text = reports[0]
-    report = parse_report(text, name)
+    report, history = pick_reports([parse_report(text, n) for n, text in reports])
+    name = report.source_name
     result = ConsistencySolver(sigtap(), KB).solve(report, mirrors)
+    past = [occurrence_keys(h) for h in history]
+
+    def repeats(item) -> int:
+        """Em quantos relatórios anteriores esse erro já apareceu nessa unidade."""
+        return sum(1 for keys in past if (item.code, item.cnes) in keys)
     if mirrors:
         have = {m.number for m in mirrors}
         need = sorted({r for p in result.problems if p.code == "ERRo" for a in p.actions for r in a.refs})
@@ -164,7 +172,8 @@ def page_solver() -> None:
     # ---------- Filtro: BPA (BPA Magnético) fica escondido por padrão ----------
     meta = " · ".join(x for x in [report.source_name, report.orgao, f"competência {report.competencia}",
                                    f"tabela SIGTAP {sigtap().competencia_display}" if sigtap().is_official else "",
-                                   f"espelho com {len(mirrors)} APAC(s)" if mirrors else ""] if x)
+                                   f"espelho com {len(mirrors)} APAC(s)" if mirrors else "",
+                                   f"comparando com {len(history)} mês(es) anterior(es)" if history else ""] if x)
     st.caption(meta)
 
     def is_bpa(p) -> bool:
@@ -209,15 +218,45 @@ def page_solver() -> None:
         name = prefix + name
         return f"{name[:32] + ('…' if len(name) > 32 else '')} ({len(g.items)})"
 
-    tabs = st.tabs([tab_label(g) for g in owners] + ["Detalhes técnicos"])
+    extra = ["Histórico"] if history else []
+    tabs = st.tabs([tab_label(g) for g in owners] + extra + ["Detalhes técnicos"])
     for tab, g in zip(tabs, owners):
         with tab:
-            owner_panel(g)
+            owner_panel(g, repeats if history else None, len(history))
+    if history:
+        with tabs[-2]:
+            history_panel(report, history, {p.code: p for p in result.problems})
     with tabs[-1]:
         technical_details(result, name, problems)
 
 
-def owner_panel(g) -> None:
+def history_panel(report, history, problems) -> None:
+    """Quantidade de cada erro mês a mês, o que é novo e o que sumiu."""
+    months = history + [report]
+    qty = [code_quantities(r) for r in months]
+    now, before = qty[-1], qty[-2]
+    new = [c for c in now if c not in before]
+    gone = [c for c in before if c not in now]
+    st.caption("Quantas vezes cada erro apareceu em cada competência. Nada fica guardado: a comparação usa só os "
+               "relatórios enviados agora.")
+    if new:
+        st.markdown(f"**Novos em {report.competencia}:** " + ", ".join(new))
+    if gone:
+        st.markdown(f"**Sumiram desde {history[-1].competencia}:** " + ", ".join(gone))
+    codes = sorted({c for q in qty for c in q}, key=lambda c: (-now.get(c, 0), -sum(q.get(c, 0) for q in qty)))
+    rows = []
+    for c in codes:
+        p = problems.get(c)
+        title = (p.actions[0].title if p.actions else p.title) if p else ""
+        row = {"Código": c, "Erro": title}
+        for r, q in zip(months, qty):
+            row[r.competencia] = q.get(c, 0)
+        row["Meses com o erro"] = f"{sum(1 for q in qty if q.get(c))} de {len(qty)}"
+        rows.append(row)
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+
+def owner_panel(g, repeats=None, history_size: int = 0) -> None:
     """Tudo o que um estabelecimento precisa corrigir: cabeçalho, mensagem pronta e um cartão por erro."""
     if not g.cnes:
         st.caption("Estes códigos aparecem no quadro de totais do relatório, mas o SIA não listou em qual estabelecimento. "
@@ -237,8 +276,15 @@ def owner_panel(g) -> None:
     for i, item in enumerate(g.items, start=1):
         with st.container(border=True):
             chips = "".join(f'<span class="ft-chip">{e(r)}</span>' for r in item.refs)
+            tags = ""
+            if repeats is not None:
+                n = repeats(item)
+                tags += (badge(f"repete · {n + 1} de {history_size + 1} meses", "ft-amber") if n
+                         else badge("novo", "ft-teal"))
+            if item.deadline_display:
+                tags += badge(f"prazo {item.deadline_display}", "ft-red" if item.deadline_expired else "ft-gray")
             html(f'<div class="ft-row"><span class="ft-num">{i}</span>{badge(item.code, "ft-red")}'
-                 f'<span class="ft-item-title">{e(item.title)}</span></div>'
+                 f'<span class="ft-item-title">{e(item.title)}</span><span class="ft-spacer"></span>{tags}</div>'
                  + (f'<div class="ft-field"><span class="ft-label">Onde</span><div>{chips}</div></div>' if chips else "")
                  + f'<div class="ft-field"><span class="ft-label">Problema</span><div>{e(item.problem)}</div></div>'
                  f'<div class="ft-fix"><span class="ft-label">Como corrigir</span><div>{e(item.fix)}</div></div>'
@@ -595,6 +641,19 @@ def theme_switcher() -> None:
 </div>
 <script>
   const w = window.parent;
+  // O Streamlit marca a página como inglês e o Chrome oferece/aplica tradução, estragando o texto
+  // ("Base de porco", "Conserva SIA"…). Marca como português e pede para não traduzir.
+  try {{
+    const root = w.document.documentElement;
+    root.lang = "pt-BR";
+    root.setAttribute("translate", "no");
+    root.classList.add("notranslate");
+    if (!w.document.querySelector('meta[name="google"]')) {{
+      const meta = w.document.createElement("meta");
+      meta.name = "google"; meta.content = "notranslate";
+      w.document.head.appendChild(meta);
+    }}
+  }} catch (e) {{}}
   const key = p => `stActiveTheme-${{p}}-v2`;
   const all = [{js_paths}, w.location.pathname];
   let current = "Light";
